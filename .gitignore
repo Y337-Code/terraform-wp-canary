@@ -8,3 +8,5 @@
 .DS_Store
 .terraform.lock.hcl
 
+# Memory bank files (Cline's documentation)
+memory-bank/

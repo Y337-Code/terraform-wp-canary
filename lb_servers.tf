@@ -76,6 +76,13 @@ resource "aws_launch_template" "lb_servers" {
         }
     }
 
+    metadata_options {
+        http_endpoint               = "enabled"
+        http_tokens                = "required"
+        http_put_response_hop_limit = 1
+        http_protocol_ipv6         = "disabled"
+    }
+
     lifecycle {
         create_before_destroy = true
     }
