@@ -184,6 +184,11 @@ variable "wp_content_efs_ap_id" {
   type = string
 }
 
+variable "wp_content_efs_filesystem_id" {
+  type        = string
+  description = "EFS filesystem ID for WordPress content"
+}
+
 variable "wp_extra_tags" {
   default = [
     {
@@ -259,9 +264,6 @@ variable "consul_extra_tags" {
   ]
 }
 
-variable "alert_email" {
-  type = string
-}
 
 variable "consul_external_egress_all_cidrs" {
   description = "CIDR blocks for consul external egress all rule"
@@ -431,4 +433,9 @@ variable "wp_bootstrap" {
   type        = bool
   default     = false
   description = "Whether to automatically download and install the latest version of WordPress during server initialization"
+}
+
+variable "wp_hostname" {
+  type        = string
+  description = "Hostname/domain for WordPress site (used for WP_HOME and WP_SITEURL)"
 }

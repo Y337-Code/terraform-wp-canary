@@ -5,11 +5,15 @@ echo 'GRUB_CMDLINE_LINUX="zswap.enabled=1 zswap.compressor=lz4 ipv6.disable=1"' 
 grub2-mkconfig -o /boot/efi/EFI/amzn/grub.cfg
 
 yum -y update
-yum -y upgrade
+# yum -y upgrade
 
-amazon-linux-extras install -y nginx1
-amazon-linux-extras install -y epel
-yum install -y nagios-plugins-all amazon-cloudwatch-agent monit htop tuned
+# Install nginx and other packages directly from Amazon Linux repositories
+echo "Starting nginx installation..." > ~/nginx_installation_status.txt
+if yum install -y nginx amazon-cloudwatch-agent htop 2>>~/nginx_installation_status.txt; then
+    echo "Nginx and packages installed successfully" >> ~/nginx_installation_status.txt
+else
+    echo "Failed to install nginx and packages" >> ~/nginx_installation_status.txt
+fi
 
 yum-config-manager --add-repo https://rpm.releases.hashicorp.com/AmazonLinux/hashicorp.repo
 yum install -y consul consul-template htop
@@ -28,25 +32,22 @@ cat << EOF > /etc/consul.d/wp_lb.json
             "id": "check-https",
             "name": "Listen https",
             "args": [
-            "/usr/lib64/nagios/plugins/check_http",
-            "-H",
-            "127.0.0.1",
-            "-S"
+            "/usr/bin/curl",
+            "-f",
+            "-s",
+            "-k",
+            "https://127.0.0.1/"
             ],
             "interval": "120s"
         },
         {
             "id": "check-nginx",
             "name": "Nginx LB Service",
-            "notes": "Nginx reverse proxy config - critical 0 process, warning only 1 process",
+            "notes": "Check if nginx process is running",
             "args": [
-            "/usr/lib64/nagios/plugins/check_procs",
-            "-C",
-            "nginx",
-            "-w",
-            "1:2",
-            "-c",
-            "2:50"
+            "/usr/bin/pgrep",
+            "-x",
+            "nginx"
             ],
             "interval": "120s"
         }
@@ -101,7 +102,7 @@ http {
     }
     {{ end }}
 
-    proxy_cache_path /usr/share/nginx/cache levels=1:2 keys_zone=wpcache:10m inactive=1h max_size=6g;
+    proxy_cache_path /usr/share/nginx/cache levels=1:2 keys_zone=wpcache:10m inactive=1h max_size=2g;
     proxy_buffers 16 32k;
     proxy_buffer_size 64k;
     proxy_connect_timeout 10s;
@@ -233,8 +234,19 @@ chown -R consul:consul /etc/consul-template.d
 
 systemctl restart consul
 
-systemctl enable nginx
-systemctl start nginx
+# Enable and start nginx with status logging
+echo "Enabling and starting nginx..." >> ~/nginx_installation_status.txt
+if systemctl enable nginx 2>>~/nginx_installation_status.txt; then
+    echo "Nginx enabled successfully" >> ~/nginx_installation_status.txt
+    if systemctl start nginx 2>>~/nginx_installation_status.txt; then
+        echo "Nginx started successfully" >> ~/nginx_installation_status.txt
+        echo "Nginx installation and startup completed" >> ~/nginx_installation_status.txt
+    else
+        echo "Failed to start nginx" >> ~/nginx_installation_status.txt
+    fi
+else
+    echo "Failed to enable nginx" >> ~/nginx_installation_status.txt
+fi
 
 echo "Configuring system time"
 timedatectl set-timezone UTC
@@ -339,47 +351,8 @@ systemctl daemon-reload
 systemctl enable amazon-cloudwatch-agent.service
 systemctl start amazon-cloudwatch-agent.service
 
-cat << 'EOF' > /etc/monitrc
-###############################################################################
-## Monit control file
-###############################################################################
-##
-## Comments begin with a '#' and extend through the end of the line. Keywords
-## are case insensitive. All path's MUST BE FULLY QUALIFIED, starting with '/'.
-##
-## Below you will find examples of some frequently used statements. For
-## information about the control file and a complete list of statements and
-## options, please have a look in the Monit manual.
-##
-##
-###############################################################################
-## Global section
-###############################################################################
-##
-## Start Monit in the background (run as a daemon):
-#
-set daemon  30              # check services at 30 seconds intervals
-
-set log syslog
-
-set httpd port 2812 and
-    use address localhost  # only accept connection from localhost
-    allow localhost        # allow localhost to connect to the server and
-    allow admin:monit      # require user 'admin' with password 'monit'
-    #with ssl {            # enable SSL/TLS and set path to server certificate
-    #    pemfile: /etc/ssl/certs/monit.pem
-    #}
-
-check process nginx with pidfile /var/run/nginx.pid
-    start program = "/usr/bin/systemctl start nginx"
-    stop program = "/usr/bin/systemctl start nginx"
-
-include /etc/monit.d/*
-#
-EOF
-
-systemctl enable monit
-systemctl start monit
+# Note: Monit is not available in Amazon Linux 2023 repositories
+# Using systemd for service monitoring instead
 
 cat <<EOL >> /etc/sysctl.conf
 net.core.somaxconn = 4096
@@ -439,7 +412,7 @@ echo "install hfsplus /bin/false" > /etc/modprobe.d/hfsplus.conf
 echo "install squashfs /bin/false" > /etc/modprobe.d/squashfs.conf
 echo "install udf /bin/false" > /etc/modprobe.d/udf.conf
 
-sudo systemctl enable tuned
-sudo tuned-adm profile network-latency
+# Note: tuned is not available in Amazon Linux 2023 repositories
+# Network optimizations are handled via sysctl.conf above
 
-systemctl reboot
+# systemctl reboot

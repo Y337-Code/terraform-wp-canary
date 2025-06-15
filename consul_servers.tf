@@ -43,8 +43,6 @@ resource "aws_launch_template" "consul_servers" {
     instance_type = var.consul_instance_type
     key_name      = var.key_name
     
-    vpc_security_group_ids = [aws_security_group.consul.id]
-    
     user_data = base64encode(templatefile("${path.module}/scripts/install_hashitools_consul_server.sh.tpl",
         {
         ami                    = var.consul_ami_id,
@@ -92,6 +90,14 @@ resource "aws_launch_template" "consul_servers" {
         http_tokens                = "required"
         http_put_response_hop_limit = 1
         http_protocol_ipv6         = "disabled"
+    }
+
+    tag_specifications {
+        resource_type = "instance"
+        tags = {
+            Name = "${terraform.workspace}-consul-server"
+            Environment-Name = "${var.name_prefix}-consul"
+        }
     }
 
     lifecycle {

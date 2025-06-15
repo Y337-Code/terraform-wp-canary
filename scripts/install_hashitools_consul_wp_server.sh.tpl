@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Normalize Input Variables used below
+# Normalize Input Variables
 DBName="${wp_db_name}"
 DBUser="${wp_mysql_user}"
 DBPassword="${wp_mysql_user_pw}"
@@ -9,135 +9,173 @@ DBHost="${wp_db_host}"
 ENV_NAME="${environment_name}"
 EFS_MOUNT="${wp_content_mount}"
 EFS_AP_ID="${wp_content_efs_ap_id}"
+WP_HOSTNAME="${wp_hostname}"
 
-# enable zswap and set lz4 as the compression algorithm for maximum caching performance
+# System optimization and updates
 echo 'GRUB_CMDLINE_LINUX="zswap.enabled=1 zswap.compressor=lz4 ipv6.disable=1"' >> /etc/default/grub
 grub2-mkconfig -o /boot/efi/EFI/amzn/grub.cfg
-
-# System Updates
 yum -y update
-yum -y upgrade
+yum install -y amazon-efs-utils
 
-# WordPress Bootstrap - Download and install WordPress if wp_bootstrap is true
-%{ if wp_bootstrap }
-echo "WordPress bootstrap enabled - installing required packages"
-
-# Install Apache and PHP 8 with required extensions
-echo "Installing Apache HTTP server"
-yum install -y httpd
-
-echo "Installing PHP 8 via Amazon Linux Extras"
-amazon-linux-extras install -y php8.2
-
-echo "Installing PHP extensions and dependencies"
-yum install -y \
-    php-fpm \
-    php-xml \
-    php-gd \
-    php-common \
-    php-cli \
-    php-process \
-    php-pdo \
-    php-intl \
-    php-mysqlnd \
-    php-mbstring \
-    php-soap \
-    wget \
-    tar
-
-echo "Package installation completed - performing pre-installation checks"
-
-# Pre-installation validation checks
-WP_BOOTSTRAP_FAILED=false
-
-# Check 1: Verify EFS is mounted at /var/www/html
-if ! mountpoint -q /var/www/html/; then
-    echo "EFS filesystem is not mounted at /var/www/html - WordPress installation cannot proceed" > ~/wp_bootstrap_efs_error.txt
-    echo "WordPress bootstrap failed: EFS not mounted"
-    WP_BOOTSTRAP_FAILED=true
+# EFS Mount Configuration
+echo "EFS Mount: $EFS_MOUNT, Access Point: $EFS_AP_ID" > ~/efs_status.txt
+if [[ ! -z "$EFS_MOUNT" ]]; then
+    mkdir -p /var/www/html
+    sed -i '/^fs-/d' /etc/fstab
+    sleep 30  # Wait for EFS availability
+    
+    if mount -t efs -o tls,accesspoint=$EFS_AP_ID $EFS_MOUNT:/ /var/www/html/ 2>>~/efs_status.txt; then
+        echo "EFS mounted successfully" >> ~/efs_status.txt
+        echo "$EFS_MOUNT:/ /var/www/html/ efs tls,accesspoint=$EFS_AP_ID,_netdev 0 0" >> /etc/fstab
+        chown ec2-user:apache /var/www/html
+        mkdir -p /var/www/html/wp-content
+        chown ec2-user:apache /var/www/html/wp-content
+    else
+        echo "EFS mount failed - using local storage" >> ~/efs_status.txt
+    fi
+else 
+    echo "No EFS configured - using local storage" >> ~/efs_status.txt
+    mkdir -p /var/www/html
 fi
 
-# Check 2: Look for existing WordPress installation (wp-config files in wp-content directory)
-if [ "$WP_BOOTSTRAP_FAILED" = false ] && [ -d "/var/www/html/wp-content" ]; then
-    if find /var/www/html/wp-content/ -name "*wp-config*" -type f 2>/dev/null | grep -q .; then
-        echo "Existing WordPress installation detected in wp-content directory - WordPress bootstrap skipped to prevent overwrite" > ~/wp_bootstrap_existing_error.txt
-        echo "WordPress bootstrap skipped: Existing installation found"
-        WP_BOOTSTRAP_FAILED=true
+# WordPress Bootstrap
+%{ if wp_bootstrap }
+echo "WordPress bootstrap enabled" >> ~/wp_status.txt
+
+# Install packages
+yum install -y httpd
+amazon-linux-extras install -y php8.2
+yum install -y php-fpm php-xml php-gd php-common php-cli php-process php-pdo php-intl php-mysqlnd php-mbstring php-soap mod_ssl mod_rewrite mysql openssl wget tar
+
+# Enable SSL module
+echo "LoadModule ssl_module modules/mod_ssl.so" >> /etc/httpd/conf.modules.d/00-ssl.conf
+
+# Pre-installation checks
+WP_FAILED=false
+
+# Check if WordPress already exists in either location
+if [ -f "/var/www/html/wp-config.php" ] || [ -f "/var/www/html-local/wp-config.php" ] || [ -f "~/wordpress-backup/wp-config.php" ]; then
+    echo "WordPress already exists - skipping install" > ~/wp_bootstrap_error.txt
+    WP_FAILED=true
+fi
+
+# WordPress installation
+if [ "$WP_FAILED" = false ]; then
+    # Always save WordPress to home directory as backup
+    echo "Downloading WordPress..." >> ~/wp_installation_status.txt
+    mkdir -p ~/wordpress-backup
+    cd /tmp
+    if wget https://wordpress.org/latest.tar.gz 2>>~/wp_installation_status.txt; then
+        tar -xzf latest.tar.gz
+        cp -R wordpress/* ~/wordpress-backup/
+        rm -rf wordpress latest.tar.gz
+        echo "WordPress backup saved to ~/wordpress-backup/" >> ~/wp_installation_status.txt
+    else
+        echo "WordPress download failed" >> ~/wp_installation_status.txt
+        WP_FAILED=true
+    fi
+    
+    if [ "$WP_FAILED" = false ]; then
+        # Try EFS first, fallback to local storage
+        if cp -R ~/wordpress-backup/* /var/www/html/ 2>>~/wp_installation_status.txt; then
+            WORDPRESS_DIR="/var/www/html"
+            echo "WordPress installed to EFS: $WORDPRESS_DIR" >> ~/wp_installation_status.txt
+        else
+            echo "EFS copy failed, using local storage" >> ~/wp_installation_status.txt
+            mkdir -p /var/www/html-local
+            cp -R ~/wordpress-backup/* /var/www/html-local/
+            WORDPRESS_DIR="/var/www/html-local"
+            echo "WordPress installed to local storage: $WORDPRESS_DIR" >> ~/wp_installation_status.txt
+            
+            # Update Apache DocumentRoot for local storage
+            sed -i "s|DocumentRoot \"/var/www/html\"|DocumentRoot \"$WORDPRESS_DIR\"|g" /etc/httpd/conf/httpd.conf
+        fi
+        
+        # Configure WordPress
+        cp $WORDPRESS_DIR/wp-config-sample.php $WORDPRESS_DIR/wp-config.php
+        sed -i "s/database_name_here/$DBName/g" $WORDPRESS_DIR/wp-config.php
+        sed -i "s/username_here/$DBUser/g" $WORDPRESS_DIR/wp-config.php
+        sed -i "s/password_here/$DBPassword/g" $WORDPRESS_DIR/wp-config.php
+        sed -i "s/localhost/$DBHost/g" $WORDPRESS_DIR/wp-config.php
+        
+        # WordPress salts
+        SALT=$(curl -L https://api.wordpress.org/secret-key/1.1/salt/)
+        printf '%s\n' "g/put your unique phrase here/d" a "$SALT" . w | ed -s $WORDPRESS_DIR/wp-config.php
+        
+        # WordPress URLs
+        echo "define( 'WP_HOME', 'https://$WP_HOSTNAME' );" >> $WORDPRESS_DIR/wp-config.php
+        echo "define( 'WP_SITEURL', 'https://$WP_HOSTNAME' );" >> $WORDPRESS_DIR/wp-config.php
+        
+        # SSL Configuration
+        mkdir -p /etc/ssl/private /etc/ssl/certs
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/ssl/private/wordpress.key -out /etc/ssl/certs/wordpress.crt -subj "/C=US/ST=State/L=City/O=Organization/CN=$WP_HOSTNAME"
+        
+        # Apache SSL config with dynamic DocumentRoot
+        cat > /etc/httpd/conf.d/wordpress-ssl.conf << EOL
+<VirtualHost *:80>
+    DocumentRoot $WORDPRESS_DIR
+    RewriteEngine On
+    RewriteCond %%{HTTPS} off
+    RewriteRule ^(.*)$ https://%%{HTTP_HOST}%%{REQUEST_URI} [R=301,L]
+</VirtualHost>
+<VirtualHost *:443>
+    DocumentRoot $WORDPRESS_DIR
+    SSLEngine on
+    SSLCertificateFile /etc/ssl/certs/wordpress.crt
+    SSLCertificateKeyFile /etc/ssl/private/wordpress.key
+    <Directory "$WORDPRESS_DIR">
+        AllowOverride All
+        Require all granted
+    </Directory>
+</VirtualHost>
+EOL
+        
+        # Database setup
+        mysql -h "$DBHost" -u root -p"$DBRootPassword" << EOF
+CREATE DATABASE IF NOT EXISTS $DBName DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS '$DBUser'@'%' IDENTIFIED BY '$DBPassword';
+GRANT ALL PRIVILEGES ON $DBName.* TO '$DBUser'@'%';
+FLUSH PRIVILEGES;
+EOF
+        
+        # Set permissions
+        chown -R ec2-user:apache $WORDPRESS_DIR/
+        find $WORDPRESS_DIR/ -type d -exec chmod 755 {} \;
+        find $WORDPRESS_DIR/ -type f -exec chmod 644 {} \;
+        
+        # Enable and start Apache
+        systemctl enable httpd
+        systemctl start httpd
+        echo "Apache enabled and started, serving from: $WORDPRESS_DIR" >> ~/wp_installation_status.txt
+        
+        echo "WordPress installation completed successfully" >> ~/wp_status.txt
     fi
 fi
-
-# Check 3: Also check root web directory for wp-config files
-if [ "$WP_BOOTSTRAP_FAILED" = false ] && find /var/www/html/ -maxdepth 1 -name "*wp-config*" -type f 2>/dev/null | grep -q .; then
-    echo "Existing WordPress installation detected in web root directory - WordPress bootstrap skipped to prevent overwrite" > ~/wp_bootstrap_existing_error.txt
-    echo "WordPress bootstrap skipped: Existing installation found in web root"
-    WP_BOOTSTRAP_FAILED=true
-fi
-
-# Proceed with WordPress installation only if all checks pass
-if [ "$WP_BOOTSTRAP_FAILED" = false ]; then
-    echo "Pre-installation checks passed - proceeding with WordPress installation"
-
-    # Create web directory if it doesn't exist
-    mkdir -p /var/www/html
-
-    # Download latest WordPress
-    cd /tmp
-    wget https://wordpress.org/latest.tar.gz
-    tar -xzf latest.tar.gz
-
-    # Move WordPress files to web root
-    cp -R wordpress/* /var/www/html/
-    rm -rf wordpress latest.tar.gz
-
-    # Create wp-config.php from sample
-    cp /var/www/html/wp-config-sample.php /var/www/html/wp-config.php
-
-    # Configure database settings in wp-config.php
-    sed -i "s/database_name_here/$DBName/g" /var/www/html/wp-config.php
-    sed -i "s/username_here/$DBUser/g" /var/www/html/wp-config.php
-    sed -i "s/password_here/$DBPassword/g" /var/www/html/wp-config.php
-    sed -i "s/localhost/$DBHost/g" /var/www/html/wp-config.php
-
-    # Generate WordPress salts and keys
-    SALT=$(curl -L https://api.wordpress.org/secret-key/1.1/salt/)
-    STRING='put your unique phrase here'
-    printf '%s\n' "g/$STRING/d" a "$SALT" . w | ed -s /var/www/html/wp-config.php
-
-    # Set proper ownership and permissions recursively
-    chown -R ec2-user:apache /var/www/html/
-    find /var/www/html/ -type d -exec chmod 755 {} \;
-    find /var/www/html/ -type f -exec chmod 644 {} \;
-
-    echo "WordPress installation completed successfully"
-else
-    echo "WordPress bootstrap failed - continuing with server setup"
-fi
 %{ else }
-echo "WordPress bootstrap disabled - assuming WordPress is already installed"
+echo "WordPress bootstrap disabled" >> ~/wp_status.txt
 %{ endif }
 
-# limits.conf Configuration
-cat <<EOL >> /etc/security/limits.conf
-apache       soft    nofile         65536
-apache       hard    nofile         65536
-apache       soft    nproc          16384
-apache       hard    nproc          16384
+# System configuration
+cat >> /etc/security/limits.conf << 'EOL'
+apache soft nofile 65536
+apache hard nofile 65536
+apache soft nproc 16384
+apache hard nproc 16384
 EOL
 
-# httpd.conf Configuration
-cat <<EOL >> /etc/httpd/conf.modules.d/00-mpm.conf
+cat >> /etc/httpd/conf.modules.d/00-mpm.conf << 'EOL'
 <IfModule mpm_prefork_module>
-    StartServers             5
-    MinSpareServers          5
-    MaxSpareServers         10
-    ServerLimit           2000
-    MaxRequestWorkers     2000
-    MaxConnectionsPerChild   0
+    StartServers 5
+    MinSpareServers 5
+    MaxSpareServers 10
+    ServerLimit 2000
+    MaxRequestWorkers 2000
+    MaxConnectionsPerChild 0
 </IfModule>
 EOL
 
-# Add the parameters to /etc/sysctl.conf
-cat <<EOL >> /etc/sysctl.conf
+# System tuning
+cat >> /etc/sysctl.conf << 'EOL'
 net.core.somaxconn = 4096
 net.core.rmem_max = 16777216
 net.core.wmem_max = 16777216
@@ -172,53 +210,42 @@ fs.suid_dumpable = 0
 kernel.exec-shield = 1
 kernel.randomize_va_space = 2
 EOL
-
 sysctl -p
 
-cat <<EOL >> /etc/sysconfig/network
+# Network configuration
+cat >> /etc/sysconfig/network << 'EOL'
 NETWORKING_IPV6=no
 IPV6INIT=no
 EOL
 
-sudo sed -i '/udp6\s\+tpi_clts\s\+v\s\+inet6\s\+udp\s\+-\s\+-/ s/^/#/' /etc/netconfig
-sudo sed -i '/tcp6\s\+tpi_cots_ord\s\+v\s\+inet6\s\+tcp\s\+-\s\+-/ s/^/#/' /etc/netconfig
+sed -i '/udp6\s\+tpi_clts\s\+v\s\+inet6\s\+udp\s\+-\s\+-/ s/^/#/' /etc/netconfig
+sed -i '/tcp6\s\+tpi_cots_ord\s\+v\s\+inet6\s\+tcp\s\+-\s\+-/ s/^/#/' /etc/netconfig
 
-echo "install dccp /bin/false" > /etc/modprobe.d/dccp.conf
-echo "install sctp /bin/false" > /etc/modprobe.d/sctp.conf
-echo "install rds /bin/false" > /etc/modprobe.d/rds.conf
-echo "install tipc /bin/false" > /etc/modprobe.d/tipc.conf
-echo "install cramfs /bin/false" > /etc/modprobe.d/cramfs.conf
-echo "install freevxfs /bin/false" > /etc/modprobe.d/freevxfs.conf
-echo "install jffs2 /bin/false" > /etc/modprobe.d/jffs2.conf
-echo "install hfs /bin/false" > /etc/modprobe.d/hfs.conf
-echo "install hfsplus /bin/false" > /etc/modprobe.d/hfsplus.conf
-echo "install squashfs /bin/false" > /etc/modprobe.d/squashfs.conf
-echo "install udf /bin/false" > /etc/modprobe.d/udf.conf
+# Disable unused protocols
+for proto in dccp sctp rds tipc cramfs freevxfs jffs2 hfs hfsplus squashfs udf; do
+    echo "install $proto /bin/false" > /etc/modprobe.d/$proto.conf
+done
 
-echo "ProxyTimeout 300" >> /etc/httpd/conf/httpd.conf
-
+# PHP optimization
 total_ram=$(free -m | awk '/^Mem:/ {print $2}')
 max_ram=$((total_ram * 70 / 100))
+calc_pm_max_children=$((max_ram / 32))
+calc_pm_start_servers=$((calc_pm_max_children / 4))
+calc_pm_min_spare_servers=$((calc_pm_start_servers / 2))
+calc_pm_max_spare_servers=$((calc_pm_start_servers * 2))
 
-# Update PHP-FPM configuration
 sed -i "s/pm.max_children = .*/pm.max_children = $calc_pm_max_children/" /etc/php-fpm.d/www.conf
 sed -i "s/pm.start_servers = .*/pm.start_servers = $calc_pm_start_servers/" /etc/php-fpm.d/www.conf
 sed -i "s/pm.min_spare_servers = .*/pm.min_spare_servers = $calc_pm_min_spare_servers/" /etc/php-fpm.d/www.conf
 sed -i "s/pm.max_spare_servers = .*/pm.max_spare_servers = $calc_pm_max_spare_servers/" /etc/php-fpm.d/www.conf
 sed -i "s/pm.max_requests = .*/pm.max_requests = 300/" /etc/php-fpm.d/www.conf
 
-# OPcache Configuration
-# Define the directory to search for PHP files. Change this to your PHP files directory.
-search_directory="/var/www/html"
-
-php_file_count=$(find $search_directory -type f -name "*.php" | wc -l)
+# OPcache
+php_file_count=$(find /var/www/html -name "*.php" 2>/dev/null | wc -l)
 calc_max_accelerated_files=$((php_file_count + (php_file_count / 2)))
 calc_memory_consumption=$((calc_max_accelerated_files / 100))
 
-# Update OPcache configuration
-cat <<EOL >> /etc/php.ini
-; Existing configuration here...
-; Add or update the OPcache configuration below:
+cat >> /etc/php.ini << EOL
 opcache.enable=1
 opcache.enable_cli=0
 opcache.memory_consumption=$calc_memory_consumption
@@ -229,47 +256,20 @@ opcache.revalidate_freq=2
 opcache.fast_shutdown=1
 EOL
 
-systemctl enable php-fpm.service
+systemctl enable php-fpm httpd
 
-systemctl enable httpd
-
-if [[ ! -z "$EFS_MOUNT" ]]; then
-    sed -i '/^fs-/d' /etc/fstab
-    mount -t efs -o tls,accesspoint=$EFS_AP_ID $EFS_MOUNT:/ /var/www/html/
-    chown ec2-user:apache wp-content
-    echo "$EFS_MOUNT:/ /var/www/html/ efs tls,accesspoint=$EFS_AP_ID,_netdev 0 0" >> /etc/fstab
-else 
-    echo "EFS Mount point not found" > ~/efs_mount_error.txt
+# Update WordPress DB config if exists
+if [ -f "/var/www/html/wp-config.php" ]; then
+    sed -i "s/define( 'DB_HOST', '[^']*' );/define( 'DB_HOST', '$DBHost' );/g" /var/www/html/wp-config.php
+    sed -i "s/define( \"DB_HOST\", \"[^\"]*\" );/define( \"DB_HOST\", \"$DBHost\" );/g" /var/www/html/wp-config.php
 fi
 
-sed -i "s/'localhost'/'$DBHost'/g" /var/www/html/wp-config.php
-
-sed -i "s/\(define( 'DB_HOST', '\)[^']*\.rds\.amazonaws\.com'/\1$DBHost'/" /var/www/html/wp-config.php
-
+# Consul setup
 yum-config-manager --add-repo https://rpm.releases.hashicorp.com/AmazonLinux/hashicorp.repo
 yum install -y consul tuned
-
-# cleanup previous consul data so instance will join cluster
 rm -rf /opt/consul/data
 
-cat << EOF > /etc/consul.d/wp_lb.json
-{
-  "service": {
-    "name": "wp-webserver",
-    "tags": [ "${environment_name}", "WordPress", "webserver" ],
-    "port": 443
-    },
-    "check": {
-      "id": "webserver_up",
-      "name": "Fetch index page from WP webserver",
-      "http": "http://127.0.0.1/index.php",
-      "interval": "30s",
-      "timeout": "5s"
-    }
-}
-EOF
-
-cat << EOF > /etc/consul.d/wp_lb.json
+cat > /etc/consul.d/wp_lb.json << EOF
 {
     "service": {
         "name": "wp-webserver",
@@ -279,63 +279,44 @@ cat << EOF > /etc/consul.d/wp_lb.json
     "check": {
         "id": "webserver_up",
         "name": "WP Service",
-        "notes": "WP webserver service status",
-        "args": [
-            "/usr/lib64/nagios/plugins/check_procs",
-            "-C",
-            "httpd"
-            ],
+        "args": ["/usr/lib64/nagios/plugins/check_procs", "-C", "httpd"],
         "interval": "120s"
     }
 }
 EOF
 
 chown -R consul:consul /etc/consul.d
-
-echo "Configuring system time"
 timedatectl set-timezone UTC
 
-echo "Starting deployment from AMI: ${ami}"
-INSTANCE_ID=`curl -s http://169.254.169.254/latest/meta-data/instance-id`
-AVAILABILITY_ZONE=`curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone`
-LOCAL_IPV4=`curl -s http://169.254.169.254/latest/meta-data/local-ipv4`
+# Instance metadata
+INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+LOCAL_IPV4=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
 
-cat << EOF > /etc/consul.d/consul.hcl
-datacenter                  = "${datacenter}"
-server                      = false
-data_dir                    = "/opt/consul/data"
-advertise_addr              = "$${LOCAL_IPV4}"
-client_addr                 = "0.0.0.0"
-log_level                   = "INFO"
-ui                          = true
-encrypt                     = "${gossip_key}"
-enable_local_script_checks  = true
-# AWS cloud join
-retry_join                  = ["provider=aws tag_key=Environment-Name tag_value=${environment_name}"]
+cat > /etc/consul.d/consul.hcl << EOF
+datacenter = "${datacenter}"
+server = false
+data_dir = "/opt/consul/data"
+advertise_addr = "$LOCAL_IPV4"
+client_addr = "0.0.0.0"
+log_level = "INFO"
+ui = true
+encrypt = "${gossip_key}"
+enable_local_script_checks = true
+retry_join = ["provider=aws tag_key=Environment-Name tag_value=${environment_name}"]
 EOF
 
-# Add WAN federation configuration if peer datacenter is specified
+# WAN federation if configured
 if [ ! -z "${peer_datacenter_name}" ]; then
-  cat << EOF > /etc/consul.d/wan_federation.hcl
-# Enable cross-datacenter service discovery
+    cat > /etc/consul.d/wan_federation.hcl << EOF
 translate_wan_addrs = true
 EOF
-
-  # Store the peer datacenter name in Consul's KV store for use in templates
-  sleep 10 # Wait for Consul to start
-  consul kv put peer_datacenter_name "${peer_datacenter_name}"
-  
-  # Note: The peer environment name for WAN federation should include the "-consul" suffix
-  # This is handled in the server configuration
+    sleep 10
+    consul kv put peer_datacenter_name "${peer_datacenter_name}"
 fi
 
 chown -R consul:consul /etc/consul.d
 chmod -R 640 /etc/consul.d/*
 
 systemctl daemon-reload
-systemctl enable consul
-
-sudo systemctl enable tuned
-sudo tuned-adm profile network-throughput
-
-systemctl reboot
+systemctl enable consul tuned
+tuned-adm profile network-throughput

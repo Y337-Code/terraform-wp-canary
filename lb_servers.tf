@@ -40,8 +40,6 @@ resource "aws_launch_template" "lb_servers" {
     instance_type = var.lb_instance_type
     key_name      = var.key_name
     
-    vpc_security_group_ids = [aws_security_group.wp_client.id]
-    
     user_data = base64encode(templatefile("${path.module}/scripts/install_hashitools_consul_lb_server.sh.tpl",
         {
         ami                   = var.lb_ami_id,
@@ -83,48 +81,15 @@ resource "aws_launch_template" "lb_servers" {
         http_protocol_ipv6         = "disabled"
     }
 
+  tag_specifications {
+    resource_type = "instance"
+    tags = {
+      Name = "${terraform.workspace}-lb-server"
+      Environment-Name = "${var.name_prefix}-consul"
+    }
+  }
+
     lifecycle {
         create_before_destroy = true
     }
-}
-
-resource "aws_sns_topic" "memory_usage_alarm_topic" {
-  name = "memory-usage-alarm-topic"
-}
-
-resource "aws_sns_topic_subscription" "memory_usage_alarm_email" {
-  topic_arn = aws_sns_topic.memory_usage_alarm_topic.arn
-  protocol  = "email"
-  endpoint  = var.alert_email
-}
-
-resource "aws_cloudwatch_metric_alarm" "memory_usage" {
-  alarm_name          = "high-memory-usage"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = "2"
-  metric_name         = "mem_used_percent"
-  namespace           = "CWAgent"
-  period              = "60"
-  statistic           = "Average"
-  threshold           = 80
-  alarm_description   = "This metric monitors ec2 memory usage"
-  dimensions = {
-    AutoScalingGroupName = aws_autoscaling_group.lb_servers.name
-  }
-  actions_enabled     = true
-  alarm_actions   = [
-    aws_autoscaling_policy.lb.arn,
-    aws_sns_topic.memory_usage_alarm_topic.arn
-  ]
-}
-
-resource "aws_autoscaling_policy" "lb" {
-  name                   = "${random_id.environment_name.hex}-asg-lb-clients"
-  policy_type            = "SimpleScaling"
-  autoscaling_group_name = aws_autoscaling_group.lb_servers.name
-  scaling_adjustment     = 1
-  adjustment_type        = "ChangeInCapacity"
-  cooldown               = 300
-
-  enabled                = true
 }

@@ -5,6 +5,10 @@
 *.tfstate
 *.tfstate.*
 
+# Variable files with sensitive data
+*.tfvars
+*.tfvars.json
+
 .DS_Store
 .terraform.lock.hcl
 
