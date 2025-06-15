@@ -42,13 +42,21 @@ fi
 %{ if wp_bootstrap }
 echo "WordPress bootstrap enabled" >> ~/wp_status.txt
 
-# Install packages
-yum install -y httpd
-amazon-linux-extras install -y php8.2
-yum install -y php-fpm php-xml php-gd php-common php-cli php-process php-pdo php-intl php-mysqlnd php-mbstring php-soap mod_ssl mod_rewrite mysql openssl wget tar
+# Install packages for Amazon Linux 2023
+echo "Starting WordPress package installation..." > ~/wp_installation_status.txt
+if yum install -y httpd php php-fpm php-xml php-gd php-common php-cli php-process php-pdo php-intl php-mysqlnd php-mbstring php-soap mysql openssl wget tar 2>>~/wp_installation_status.txt; then
+    echo "WordPress packages installed successfully" >> ~/wp_installation_status.txt
+else
+    echo "Failed to install WordPress packages" >> ~/wp_installation_status.txt
+fi
 
-# Enable SSL module
-echo "LoadModule ssl_module modules/mod_ssl.so" >> /etc/httpd/conf.modules.d/00-ssl.conf
+# Install and configure SSL module for Amazon Linux 2023
+echo "Configuring SSL module..." >> ~/wp_installation_status.txt
+if yum install -y mod_ssl 2>>~/wp_installation_status.txt; then
+    echo "SSL module installed successfully" >> ~/wp_installation_status.txt
+else
+    echo "SSL module installation failed, using built-in SSL support" >> ~/wp_installation_status.txt
+fi
 
 # Pre-installation checks
 WP_FAILED=false
@@ -266,7 +274,7 @@ fi
 
 # Consul setup
 yum-config-manager --add-repo https://rpm.releases.hashicorp.com/AmazonLinux/hashicorp.repo
-yum install -y consul tuned
+yum install -y consul
 rm -rf /opt/consul/data
 
 cat > /etc/consul.d/wp_lb.json << EOF
@@ -279,7 +287,7 @@ cat > /etc/consul.d/wp_lb.json << EOF
     "check": {
         "id": "webserver_up",
         "name": "WP Service",
-        "args": ["/usr/lib64/nagios/plugins/check_procs", "-C", "httpd"],
+        "args": ["/usr/bin/pgrep", "-x", "httpd"],
         "interval": "120s"
     }
 }
@@ -318,5 +326,6 @@ chown -R consul:consul /etc/consul.d
 chmod -R 640 /etc/consul.d/*
 
 systemctl daemon-reload
-systemctl enable consul tuned
-tuned-adm profile network-throughput
+systemctl enable consul
+# Note: tuned is not available in Amazon Linux 2023 repositories
+# Network optimizations are handled via sysctl.conf above

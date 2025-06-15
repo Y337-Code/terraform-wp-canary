@@ -553,13 +553,45 @@ sudo find /var/www/html/ -type d -exec chmod 755 {} \;
 sudo find /var/www/html/ -type f -exec chmod 644 {} \;
 ```
 
-#### Issue: PHP Extensions Missing
+#### Issue: PHP Extensions Missing or "amazon-linux-extras: command not found"
 
-**Solution**: Ensure PHP 8.2 and extensions are installed:
+**Solution**: On Amazon Linux 2023, use direct yum installation instead of amazon-linux-extras:
 
 ```bash
-sudo amazon-linux-extras install -y php8.2
-sudo yum install -y php-fpm php-xml php-gd php-mysqlnd php-mbstring php-soap
+# For Amazon Linux 2023
+sudo yum install -y php php-fpm php-xml php-gd php-mysqlnd php-mbstring php-soap
+
+# Check PHP installation
+php -v
+php -m | grep -E "(mysql|gd|xml|mbstring|soap)"
+```
+
+#### Issue: Apache SSL Module Errors
+
+**Solution**: Install the SSL module properly for Amazon Linux 2023:
+
+```bash
+# Install SSL module
+sudo yum install -y mod_ssl
+
+# Check if SSL module is loaded
+sudo httpd -M | grep ssl
+
+# Test Apache configuration
+sudo httpd -t
+```
+
+#### Issue: "mod_rewrite" or "mod_ssl" package not found
+
+**Solution**: These modules are included with httpd on Amazon Linux 2023:
+
+```bash
+# mod_rewrite is built into httpd - no separate package needed
+# For SSL support, install mod_ssl package
+sudo yum install -y mod_ssl
+
+# Verify modules are available
+sudo httpd -M | grep -E "(rewrite|ssl)"
 ```
 
 #### Issue: Database Connection Errors
