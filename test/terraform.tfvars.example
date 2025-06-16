@@ -1,6 +1,11 @@
 # Copy this file to terraform.tfvars and customize the values for your deployment
+# This example includes all available configuration options for the WordPress Canary module
 
-# AWS Configuration
+# =============================================================================
+# AWS CONFIGURATION
+# =============================================================================
+
+# AWS Profile (optional)
 # aws_profile = "your-aws-profile"  # Uncomment and set your AWS profile name
 # If not set, will use default AWS credentials (environment variables, IAM role, etc.)
 
@@ -9,12 +14,18 @@ aws_region = "us-east-1"
 aws_zone_a = "a"
 aws_zone_b = "b"
 
-# Environment and Naming
+# =============================================================================
+# ENVIRONMENT AND NAMING
+# =============================================================================
+
 environment = "test"
 name_prefix = "wp-test"
 owner       = "your-team-name"
 
-# VPC Configuration
+# =============================================================================
+# VPC CONFIGURATION
+# =============================================================================
+
 vpc_cidr             = "192.168.0.0/16"
 dmz_subnet_a_cidr    = "192.168.1.0/24"
 dmz_subnet_b_cidr    = "192.168.4.0/24"
@@ -28,7 +39,10 @@ infra_subnet_b_cidr  = "192.168.8.0/24"
 # Security Configuration
 allowed_inbound_cidrs = ["192.168.0.0/16"]  # Restrict to VPC CIDR for security
 
-# Database Configuration
+# =============================================================================
+# DATABASE CONFIGURATION
+# =============================================================================
+
 database_name      = "wordpress"
 db_master_username = "wpdbadmin"
 db_master_password = "ChangeMe123!"  # Change this to a secure password
@@ -41,44 +55,128 @@ wp_mysql_user    = "wpuser"
 wp_mysql_user_pw = "wppassword123"  # Change this to a secure password
 wp_mysql_root_pw = "rootpassword123"  # Change this to a secure password
 
-# EFS Configuration
+# =============================================================================
+# EFS CONFIGURATION
+# =============================================================================
+
 wp_content_mount_point = "/var/www/html/wp-content"
 
-# Consul Configuration
+# =============================================================================
+# CONSUL CONFIGURATION
+# =============================================================================
+
 consul_servers         = 3
 consul_version         = "1.15.2"
 consul_cluster_version = "v1"
 consul_instance_type   = "t3.micro"
 
-# WordPress Configuration
-wp_instance_type = "t3.small"
-wp_servers_min   = 2
-wp_servers_max   = 6
-
-# Load Balancer Configuration
-lb_instance_type = "t3.micro"
-lb_servers_min   = 2
-lb_servers_max   = 4
-
-# Instance Configuration
-key_name  = ""  # Specify your EC2 key pair name for SSH access
-public_ip = false  # Set to true if you want public IPs on instances
-
 # Consul Features
-acl_bootstrap_bool    = "true"
-enable_connect        = "true"
+acl_bootstrap_bool = "true"
+enable_connect     = "true"
+
+# Additional Consul Configuration (optional)
+# consul_config = {
+#   "log_level" = "INFO"
+#   "ui_config" = "{\"enabled\": true}"
+# }
+
+# =============================================================================
+# CONSUL GOSSIP KEY CONFIGURATION
+# =============================================================================
+
+# Consul Gossip Encryption Key
+# Generate using: ./generate-gossip-key.sh -u
+# This key encrypts all Consul gossip communication between cluster members
+# REQUIRED for canary deployments and WAN federation
+# OPTIONAL for single deployments (recommended for security)
+# shared_gossip_key = "your-generated-gossip-key-here"
+
+# =============================================================================
+# WAN FEDERATION CONFIGURATION (for Canary Deployments)
+# =============================================================================
+
+# Enable WAN federation to connect multiple WordPress deployments
+# Required for canary deployments across multiple datacenters
 enable_wan_federation = "false"
+
+# Peer datacenter configuration (only needed if enable_wan_federation = "true")
+# peer_datacenter_name   = "wp-prod"           # Name of peer datacenter
+# peer_datacenter_region = "us-west-2"        # AWS region of peer datacenter
+# peer_environment_name  = "wp-prod-consul"   # Environment name of peer datacenter
+
+# =============================================================================
+# WORDPRESS CONFIGURATION
+# =============================================================================
+
+wp_instance_type = "t3.large"  # Instance type for WordPress servers
+wp_servers_min   = 2           # Minimum number of WordPress servers
+wp_servers_max   = 6           # Maximum number of WordPress servers
 
 # WordPress Bootstrap
 wp_bootstrap = "true"  # Automatically install WordPress
 
-# Note: CloudWatch alerts have been completely removed from the module
-# No email configuration is needed as monitoring is limited to basic metrics
+# WordPress Site Configuration
+wp_hostname = "wp-test.example.com"  # Hostname for WordPress site
 
-# Tags
+# =============================================================================
+# LOAD BALANCER CONFIGURATION
+# =============================================================================
+
+lb_instance_type = "t3.micro"
+lb_servers_min   = 2
+lb_servers_max   = 4
+
+# =============================================================================
+# INSTANCE CONFIGURATION
+# =============================================================================
+
+key_name  = ""     # Specify your EC2 key pair name for SSH access
+public_ip = false  # Set to true if you want public IPs on instances
+
+# AMI Configuration (optional - will use latest Amazon Linux 2023 if not specified)
+# consul_ami_id = "ami-12345678"  # Custom AMI for Consul servers
+# wp_ami_id     = "ami-87654321"  # Custom AMI for WordPress servers
+# lb_ami_id     = "ami-11223344"  # Custom AMI for load balancer servers
+
+# =============================================================================
+# TAGS
+# =============================================================================
+
 common_tags = {
   Environment = "test"
   Project     = "wordpress-canary-test"
   Automation  = "terraform"
   Owner       = "your-team-name"
 }
+
+# =============================================================================
+# CONFIGURATION NOTES
+# =============================================================================
+
+# SECURITY RECOMMENDATIONS:
+# 1. Change all default passwords to secure values
+# 2. Generate a gossip key using ./generate-gossip-key.sh
+# 3. Restrict allowed_inbound_cidrs to your actual IP ranges
+# 4. Use AWS Secrets Manager for sensitive values in production
+
+# CANARY DEPLOYMENT SETUP:
+# 1. Generate a shared gossip key: ./generate-gossip-key.sh -u
+# 2. Use the same gossip key in all deployments that need to communicate
+# 3. Configure WAN federation variables for cross-datacenter communication
+# 4. Ensure network connectivity (VPC peering or Transit Gateway)
+# 5. Configure security groups to allow Consul ports (8300, 8301, 8302)
+
+# SCALING RECOMMENDATIONS:
+# - For testing: Use smaller instance types (t3.micro, t3.small)
+# - For production: Use larger instance types (t3.large, t3.xlarge)
+# - Start with minimum servers, scale up after successful deployment
+
+# MONITORING:
+# - CloudWatch alerts have been removed from the module
+# - Basic CloudWatch metrics are still collected
+# - Use AWS Console or external monitoring for alerts
+
+# For detailed documentation, see:
+# - Main README.md for comprehensive troubleshooting
+# - test/README.md for test environment specific information
+# - Consul Gossip Key Configuration section in main README
