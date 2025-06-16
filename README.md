@@ -364,6 +364,318 @@ consul version
 consul reload
 ```
 
+## Troubleshooting Consul Registration on Load Balancer Instances
+
+If Consul is not registering properly on nginx (load balancer) instances, follow these specific troubleshooting steps:
+
+### 1. Check Consul Installation Status
+
+The load balancer installation process now includes Consul status logging:
+
+```bash
+# Check the installation status file
+cat ~/nginx_installation_status.txt
+
+# Look for Consul-specific entries
+grep -i consul ~/nginx_installation_status.txt
+```
+
+**Expected entries**:
+
+- "Starting Consul services..."
+- "Consul enabled successfully"
+- "Consul started successfully"
+- "Consul is ready after X seconds"
+- "All Consul services started successfully"
+
+### 2. Verify Consul Service Status
+
+```bash
+# Check consul service status
+sudo systemctl status consul
+sudo systemctl status consul-template
+
+# Check if consul is running and listening
+sudo netstat -tlnp | grep consul
+ps aux | grep consul
+```
+
+### 3. Check Consul Configuration Files
+
+```bash
+# Verify main consul configuration exists
+cat /etc/consul.d/consul.hcl
+
+# Check service definition
+cat /etc/consul.d/wp_lb.json
+
+# Verify file ownership
+ls -la /etc/consul.d/
+```
+
+### 4. Test Consul API Connectivity
+
+```bash
+# Check if Consul API is responding
+curl -s http://127.0.0.1:8500/v1/status/leader
+
+# Check cluster members from load balancer
+curl -s http://127.0.0.1:8500/v1/catalog/nodes
+
+# Check if load balancer service is registered
+curl -s http://127.0.0.1:8500/v1/catalog/service/wp-lb
+```
+
+### 5. Common Load Balancer Consul Issues
+
+#### Issue: Consul starts but doesn't join cluster
+
+**Root Cause**: Service startup sequence or configuration timing
+**Solution**: Check the startup logs and verify Environment-Name tags
+
+```bash
+# Check consul logs for join attempts
+sudo journalctl -u consul | grep -i join
+
+# Verify environment tags match
+grep "tag_value" /etc/consul.d/consul.hcl
+```
+
+#### Issue: Consul-template fails to start
+
+**Root Cause**: Consul not ready when consul-template starts
+**Solution**: The updated script now waits for Consul to be ready
+
+```bash
+# Check consul-template logs
+sudo journalctl -u consul-template
+
+# Verify consul-template configuration
+cat /etc/consul-template.d/config.hcl
+```
+
+#### Issue: Service registration missing
+
+**Root Cause**: Service definition file issues or permissions
+**Solution**: Verify service definition and restart consul
+
+```bash
+# Check service definition syntax
+cat /etc/consul.d/wp_lb.json
+
+# Verify file permissions
+ls -la /etc/consul.d/wp_lb.json
+
+# Restart consul to reload services
+sudo systemctl restart consul
+```
+
+### 6. Manual Consul Registration (Emergency Fix)
+
+If automatic registration fails, you can manually register the service:
+
+```bash
+# Register load balancer service manually
+curl -X PUT http://127.0.0.1:8500/v1/agent/service/register \
+  -d '{
+    "ID": "wp-lb",
+    "Name": "wp-lb",
+    "Tags": ["nginx", "loadbalancer"],
+    "Port": 443,
+    "Check": {
+      "HTTP": "https://127.0.0.1/",
+      "Interval": "120s"
+    }
+  }'
+
+# Verify registration
+curl -s http://127.0.0.1:8500/v1/agent/services
+```
+
+### 7. Restart Consul Services (Load Balancer)
+
+If services are in a failed state, restart them in the correct order:
+
+```bash
+# Stop services
+sudo systemctl stop consul-template
+sudo systemctl stop consul
+
+# Clear any stale data
+sudo rm -rf /opt/consul/data/*
+
+# Start services in correct order
+sudo systemctl start consul
+
+# Wait for consul to be ready
+sleep 10
+
+# Start consul-template
+sudo systemctl start consul-template
+
+# Check status
+sudo systemctl status consul consul-template
+```
+
+## Troubleshooting Database Connectivity
+
+The WordPress installation includes an advanced database readiness check that waits for Aurora Serverless to become fully operational before proceeding with WordPress installation.
+
+### 1. Understanding the Database Readiness Check
+
+The system implements a robust database connectivity check with the following features:
+
+- **25-minute maximum timeout** (50 attempts with exponential backoff)
+- **Exponential backoff**: Starts at 30 seconds, increases by 15 seconds each attempt, caps at 120 seconds
+- **Aurora master credentials**: Uses Aurora admin credentials for initial connectivity testing
+- **Comprehensive debug logging**: Detailed connection information in `~/install.log`
+
+### 2. Check Database Connectivity Status
+
+Access your WordPress server instance and check the installation log:
+
+```bash
+# Check the main installation log
+cat ~/install.log
+
+# Look specifically for database connectivity information
+grep -A 20 "DATABASE CONNECTION DEBUG" ~/install.log
+
+# Monitor database connectivity attempts in real-time
+tail -f ~/install.log | grep -E "(DB|database)"
+```
+
+### 3. Understanding Database Debug Output
+
+The database readiness check provides detailed debug information:
+
+```bash
+=== DATABASE CONNECTION DEBUG ===
+DB Host: wp-test-cluster-default.cluster-cr6yw4qs8p1s.us-east-1.rds.amazonaws.com
+Aurora Master User: wpdbadmin
+Aurora Master Password Length: 12
+WordPress DB Name: wordpress
+WordPress User: wpuser
+WordPress User Password Length: 13
+DB check start: wp-test-cluster-default.cluster-cr6yw4qs8p1s.us-east-1.rds.amazonaws.com
+Attempting connection: mysql -h wp-test-cluster-default.cluster-cr6yw4qs8p1s.us-east-1.rds.amazonaws.com -u wpdbadmin -p[HIDDEN]
+DB wait 1/50 (30s)
+DB wait 2/50 (45s)
+DB wait 3/50 (60s)
+...
+DB ready: attempt 15
+```
+
+**Key Information**:
+
+- **DB Host**: Aurora cluster endpoint
+- **Aurora Master User**: Admin username for initial connection (e.g., `wpdbadmin`)
+- **Password Length**: Confirms credentials are being passed (without exposing actual passwords)
+- **WordPress DB Name**: Database name that will be created
+- **WordPress User**: Application user that will be created for WordPress
+- **Connection Attempts**: Shows each retry with increasing wait times
+
+### 4. Manual Database Connectivity Testing
+
+If the automatic check fails, you can manually test database connectivity:
+
+```bash
+# Test Aurora master credentials (replace with your actual values)
+mysql -h your-aurora-endpoint.cluster-xxxxx.us-east-1.rds.amazonaws.com -u wpdbadmin -p
+
+# Check if Aurora is accepting connections
+telnet your-aurora-endpoint.cluster-xxxxx.us-east-1.rds.amazonaws.com 3306
+
+# Test from within the VPC (Aurora is not publicly accessible)
+nc -zv your-aurora-endpoint.cluster-xxxxx.us-east-1.rds.amazonaws.com 3306
+```
+
+### 5. Common Database Connectivity Issues
+
+#### Issue: "Unknown MySQL server host" Error
+
+**Root Cause**: Aurora Serverless is still starting up (can take 5-20 minutes)
+**Solution**: The system automatically waits up to 25 minutes. Check Aurora status in AWS Console.
+
+```bash
+# Check Aurora cluster status
+aws rds describe-db-clusters --db-cluster-identifier your-cluster-name
+
+# Monitor the readiness check progress
+tail -f ~/install.log | grep "DB wait"
+```
+
+#### Issue: "Access denied" Error
+
+**Root Cause**: Credential mismatch between Aurora master credentials and script configuration
+**Solution**: Verify Aurora master credentials match Terraform configuration
+
+```bash
+# Check what credentials the script is using
+grep -A 10 "DATABASE CONNECTION DEBUG" ~/install.log
+
+# Verify Aurora master username in AWS Console
+aws rds describe-db-clusters --db-cluster-identifier your-cluster-name \
+  --query 'DBClusters[0].MasterUsername'
+```
+
+#### Issue: Database Timeout After 25 Minutes
+
+**Root Cause**: Aurora Serverless taking longer than expected or configuration issue
+**Solution**: Check Aurora status and network connectivity
+
+```bash
+# Check if Aurora is running
+aws rds describe-db-clusters --db-cluster-identifier your-cluster-name \
+  --query 'DBClusters[0].Status'
+
+# Check security group rules for Aurora
+aws ec2 describe-security-groups --group-ids your-aurora-sg-id
+
+# Verify VPC connectivity
+aws ec2 describe-route-tables --filters "Name=vpc-id,Values=your-vpc-id"
+```
+
+### 6. Database Credential Architecture
+
+The system uses two sets of credentials:
+
+#### Aurora Master Credentials
+
+- **Purpose**: Initial database connection and setup
+- **Username**: Aurora master username (e.g., `wpdbadmin`)
+- **Password**: Aurora master password (e.g., `ChangeMe123!`)
+- **Usage**: Database readiness check, database creation, user creation
+
+#### WordPress Application Credentials
+
+- **Purpose**: WordPress application database access
+- **Username**: WordPress database user (e.g., `wpuser`)
+- **Password**: WordPress user password (e.g., `wppassword123`)
+- **Usage**: WordPress configuration, application runtime
+
+### 7. Monitoring Database Setup Process
+
+```bash
+# Watch the complete database setup process
+tail -f ~/install.log | grep -E "(DB|database|mysql)"
+
+# Check if database and user creation succeeded
+grep -A 5 "Setting up database using Aurora master credentials" ~/install.log
+
+# Verify WordPress database test
+grep "WP DB test" ~/install.log
+```
+
+**Expected Success Sequence**:
+
+1. `DB check start: [aurora-endpoint]`
+2. `DB ready: attempt X`
+3. `DB ready - proceeding`
+4. `Setting up database using Aurora master credentials...`
+5. `DB setup OK`
+6. `WP DB test OK`
+
 ## Troubleshooting WordPress Bootstrap
 
 If WordPress bootstrap fails or doesn't work as expected, follow these troubleshooting steps:
@@ -382,39 +694,58 @@ aws ssm start-session --target i-1234567890abcdef0
 
 **Note**: Ensure your EC2 instances have the SSM agent installed and proper IAM roles attached for SSM access.
 
-### 2. Check Bootstrap Error Files
+### 2. Check Installation Status
 
-The bootstrap process creates error files in the home directory (`/home/ec2-user/`) when issues occur:
-
-#### EFS Mount Issues
+The WordPress installation process now uses a consolidated log file for all operations:
 
 ```bash
-# Check if EFS mount failed
+# Check the main installation log (replaces multiple status files)
+cat ~/install.log
+
+# Check specific installation phases
+grep -E "(Installing|Services|EFS|DB|WP|Consul)" ~/install.log
+
+# Monitor installation progress in real-time
+tail -f ~/install.log
+```
+
+**Key Log Sections**:
+
+- **Apache/PHP Installation**: `Installing Apache/PHP...` → `Apache/PHP OK`
+- **Service Startup**: `Services started`
+- **EFS Mount**: `EFS: fs-xxxxx` → `EFS OK`
+- **Database Connectivity**: `=== DATABASE CONNECTION DEBUG ===` → `DB ready`
+- **WordPress Download**: `WP downloaded`
+- **WordPress Installation**: `WP to EFS` or `WP to local`
+- **Database Setup**: `DB setup OK`
+- **Consul Setup**: `Consul installed` → `Consul started`
+
+### 3. Legacy Error Files (Deprecated)
+
+**Note**: The following error files are from older versions and have been replaced by the consolidated `~/install.log`:
+
+#### EFS Mount Issues (Legacy)
+
+```bash
+# Check if EFS mount failed (legacy)
 cat ~/wp_bootstrap_efs_error.txt
 ```
 
-**Location**: `/home/ec2-user/wp_bootstrap_efs_error.txt`
-**Content**: Indicates EFS filesystem is not mounted at `/var/www/html/`
-
-#### Existing Installation Detection
+#### Existing Installation Detection (Legacy)
 
 ```bash
-# Check if existing WordPress installation was detected
+# Check if existing WordPress installation was detected (legacy)
 cat ~/wp_bootstrap_existing_error.txt
 ```
 
-**Location**: `/home/ec2-user/wp_bootstrap_existing_error.txt`
-**Content**: Indicates existing WordPress files were found, preventing overwrite
-
-#### General EFS Mount Issues
+#### General EFS Mount Issues (Legacy)
 
 ```bash
-# Check general EFS mount errors
+# Check general EFS mount errors (legacy)
 cat ~/efs_mount_error.txt
 ```
 
-**Location**: `/home/ec2-user/efs_mount_error.txt`
-**Content**: Indicates EFS mount point configuration issues
+**Migration Note**: All status information is now consolidated in `~/install.log` for easier troubleshooting.
 
 ### 3. Verify System Status
 
@@ -597,6 +928,129 @@ sudo httpd -M | grep -E "(rewrite|ssl)"
 #### Issue: Database Connection Errors
 
 **Solution**: Verify database configuration in wp-config.php and ensure RDS instance is accessible.
+
+#### Issue: "Unable to find a match: mysql" package error
+
+**Solution**: On Amazon Linux 2023, use `mariadb` instead of `mysql`:
+
+```bash
+# For Amazon Linux 2023
+sudo yum install -y mariadb
+
+# Check MariaDB client installation
+which mysql
+mysql --version
+```
+
+#### Issue: Apache not starting or httpd service not found
+
+**Solution**: The updated WordPress script now installs httpd unconditionally at the beginning, but if it's missing:
+
+```bash
+# Install Apache (now done automatically in script)
+sudo yum install -y httpd mod_ssl
+
+# Check if httpd is installed
+rpm -qa | grep httpd
+
+# Enable and start Apache
+sudo systemctl enable httpd
+sudo systemctl start httpd
+
+# Check Apache status
+sudo systemctl status httpd
+
+# Check installation status from script
+cat ~/wp_installation_status.txt | grep -i apache
+```
+
+**Note**: The WordPress script now ensures Apache gets installed regardless of bootstrap settings or other package failures.
+
+#### Enhanced Consul Installation Status Logging
+
+The updated WordPress script now provides detailed status logging for all Consul service operations:
+
+```bash
+# Check comprehensive Consul installation status
+cat ~/wp_installation_status.txt | grep -i consul
+
+# Look for specific Consul operations
+grep -E "(Consul|consul)" ~/wp_installation_status.txt
+```
+
+**Expected Consul status entries**:
+
+- "Starting Consul setup..."
+- "Consul installed successfully"
+- "Creating Consul configuration..."
+- "Consul configuration created successfully"
+- "Starting Consul services..."
+- "Consul enabled successfully"
+- "AWS metadata ready"
+- "Consul start succeeded"
+- "Consul API ready"
+- "Consul joined cluster - X members"
+- "Consul startup completed"
+
+**Troubleshooting with Consul status logs**:
+
+```bash
+# Check if Consul installation failed
+grep -i "failed.*consul" ~/wp_installation_status.txt
+
+# Check if Consul startup failed
+grep -i "consul.*failed" ~/wp_installation_status.txt
+
+# Check if AWS metadata was ready
+grep -i "metadata" ~/wp_installation_status.txt
+
+# Verify Consul startup sequence completed
+grep -i "consul startup completed" ~/wp_installation_status.txt
+
+# Check cluster join status
+grep -i "joined cluster" ~/wp_installation_status.txt
+```
+
+#### Enhanced Apache Installation Status Logging
+
+The updated WordPress script now provides detailed status logging for all Apache service operations:
+
+```bash
+# Check comprehensive Apache installation status
+cat ~/wp_installation_status.txt
+
+# Look for specific Apache operations
+grep -E "(Apache|httpd|PHP-FPM)" ~/wp_installation_status.txt
+```
+
+**Expected status entries**:
+
+- "Installing Apache and PHP (mandatory)..."
+- "Apache and PHP installed successfully (mandatory)"
+- "SSL module installed successfully (mandatory)"
+- "Enabling Apache and PHP-FPM services..."
+- "Apache (httpd) enabled successfully"
+- "PHP-FPM enabled successfully"
+- "Starting Apache and PHP-FPM services..."
+- "Apache (httpd) started successfully"
+- "PHP-FPM started successfully"
+- "All Apache services enabled and started successfully (mandatory)"
+
+**Troubleshooting with status logs**:
+
+```bash
+# Check if Apache installation failed
+grep -i "failed.*apache" ~/wp_installation_status.txt
+
+# Check if service enable operations failed
+grep -i "failed.*enable" ~/wp_installation_status.txt
+
+# Check if service start operations failed
+grep -i "failed.*start" ~/wp_installation_status.txt
+
+# Verify all operations completed successfully
+grep -i "successfully" ~/wp_installation_status.txt | grep -E "(Apache|httpd|PHP-FPM)"
+```
 
 ### 8. Useful Commands
 

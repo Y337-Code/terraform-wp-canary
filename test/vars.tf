@@ -201,15 +201,15 @@ variable "wp_instance_type" {
 }
 
 variable "wp_servers_min" {
-  type        = number
+  type        = string
   description = "Minimum number of WordPress servers"
-  default     = 1
+  default     = "1"
 }
 
 variable "wp_servers_max" {
-  type        = number
+  type        = string
   description = "Maximum number of WordPress servers"
-  default     = 1
+  default     = "1"
 }
 
 variable "lb_ami_id" {
@@ -225,15 +225,15 @@ variable "lb_instance_type" {
 }
 
 variable "lb_servers_min" {
-  type        = number
+  type        = string
   description = "Minimum number of load balancer servers"
-  default     = 2
+  default     = "2"
 }
 
 variable "lb_servers_max" {
-  type        = number
+  type        = string
   description = "Maximum number of load balancer servers"
-  default     = 4
+  default     = "4"
 }
 
 variable "key_name" {

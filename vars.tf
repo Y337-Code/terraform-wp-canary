@@ -62,7 +62,7 @@ variable "lb_servers_max" {
 }
 
 variable "wp_servers_min" {
-  default     = "2"
+  default     = "1"
   description = "number of min Consul instances"
 }
 
@@ -438,4 +438,17 @@ variable "wp_bootstrap" {
 variable "wp_hostname" {
   type        = string
   description = "Hostname/domain for WordPress site (used for WP_HOME and WP_SITEURL)"
+}
+
+# Aurora Master Credentials for Initial Database Connection
+variable "aurora_master_username" {
+  type        = string
+  description = "Aurora master username for initial database connection"
+  sensitive   = true
+}
+
+variable "aurora_master_password" {
+  type        = string
+  description = "Aurora master password for initial database connection"
+  sensitive   = true
 }

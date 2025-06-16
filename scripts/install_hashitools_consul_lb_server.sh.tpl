@@ -9,7 +9,7 @@ yum -y update
 
 # Install nginx and other packages directly from Amazon Linux repositories
 echo "Starting nginx installation..." > ~/nginx_installation_status.txt
-if yum install -y nginx amazon-cloudwatch-agent htop 2>>~/nginx_installation_status.txt; then
+if yum install -y nginx amazon-cloudwatch-agent nc htop 2>>~/nginx_installation_status.txt; then
     echo "Nginx and packages installed successfully" >> ~/nginx_installation_status.txt
 else
     echo "Failed to install nginx and packages" >> ~/nginx_installation_status.txt
@@ -29,27 +29,28 @@ cat << EOF > /etc/consul.d/wp_lb.json
     },
     "checks": [
         {
-            "id": "check-https",
-            "name": "Listen https",
-            "args": [
-            "/usr/bin/curl",
-            "-f",
-            "-s",
-            "-k",
-            "https://127.0.0.1/"
-            ],
-            "interval": "120s"
+            "id": "nginx_process",
+            "name": "Nginx Process Check",
+            "notes": "Check if nginx process is running",
+            "args": ["/usr/bin/pgrep", "-x", "nginx"],
+            "interval": "30s",
+            "timeout": "5s"
         },
         {
-            "id": "check-nginx",
-            "name": "Nginx LB Service",
-            "notes": "Check if nginx process is running",
-            "args": [
-            "/usr/bin/pgrep",
-            "-x",
-            "nginx"
-            ],
-            "interval": "120s"
+            "id": "https_port",
+            "name": "HTTPS Port Check",
+            "notes": "Check if HTTPS port 443 is listening",
+            "args": ["nc", "-z", "localhost", "443"],
+            "interval": "30s",
+            "timeout": "5s"
+        },
+        {
+            "id": "http_port",
+            "name": "HTTP Port Check",
+            "notes": "Check if HTTP port 80 is listening (for redirects)",
+            "args": ["nc", "-z", "localhost", "80"],
+            "interval": "30s",
+            "timeout": "5s"
         }
     ]
 }

@@ -506,7 +506,8 @@ module "aurora_mysql" {
 module "wordpress_canary" {
   source = "../"
   
-  # Ensure Aurora is fully created before EC2 instances
+  # Ensure Aurora resources are created before EC2 instances
+  # Database readiness check is handled within WordPress installation script
   depends_on = [
     module.aurora_mysql.aurora_cluster_id,
     module.aurora_mysql.aurora_endpoint
@@ -550,6 +551,10 @@ module "wordpress_canary" {
   wp_mysql_user    = var.wp_mysql_user
   wp_mysql_user_pw = var.wp_mysql_user_pw
   wp_mysql_root_pw = var.wp_mysql_root_pw
+  
+  # Aurora Master Credentials for Initial Database Connection
+  aurora_master_username = var.db_master_username
+  aurora_master_password = var.db_master_password
   
   # EFS Configuration
   wp_content_mount_point      = var.wp_content_mount_point

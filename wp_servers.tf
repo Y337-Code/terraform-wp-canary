@@ -49,6 +49,8 @@ resource "aws_launch_template" "wp_servers" {
       wp_mysql_user           = var.wp_mysql_user,
       wp_mysql_user_pw        = var.wp_mysql_user_pw,
       wp_mysql_root_pw        = var.wp_mysql_root_pw,
+      aurora_master_username  = var.aurora_master_username,
+      aurora_master_password  = var.aurora_master_password,
       wp_content_mount        = var.wp_content_efs_filesystem_id,
       wp_content_efs_ap_id    = var.wp_content_efs_ap_id,
       peer_datacenter_name    = var.peer_datacenter_name,
