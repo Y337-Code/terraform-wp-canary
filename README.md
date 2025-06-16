@@ -337,7 +337,7 @@ consul members
 #### Issue: "Encrypt key mismatch"
 
 **Root Cause**: Different gossip encryption keys on different servers
-**Solution**: Ensure all servers use the same gossip key from Terraform
+**Solution**: Ensure all servers use the same gossip key from Terraform. See the [Consul Gossip Key Configuration](#consul-gossip-key-configuration) section for detailed information on generating and configuring gossip keys.
 
 #### Issue: "Permission denied" errors
 
@@ -1087,6 +1087,297 @@ wget --spider http://localhost/
 df -h
 du -sh /var/www/html/
 ```
+
+## Consul Gossip Key Configuration
+
+Consul uses gossip encryption to secure communication between cluster members. This section explains how to generate and configure gossip keys for your WordPress Canary deployments.
+
+### Overview
+
+The **gossip key** is a base64-encoded 32-byte encryption key that Consul uses to encrypt all gossip communication between cluster members. Each WordPress deployment creates one **Consul datacenter**, and all nodes within that datacenter must share the same gossip key.
+
+**Consul Datacenters Explained:**
+
+- Each WordPress deployment = one Consul datacenter
+- Datacenters are identified by unique names (e.g., "wp-prod-east", "wp-staging-west")
+- Single datacenter: All Consul nodes communicate within one isolated cluster
+- Multi-datacenter: Multiple clusters can be federated for advanced use cases
+
+**When gossip keys are required:**
+
+- **Optional for single deployments**: Basic security enhancement
+- **Required for canary deployments**: Multiple datacenters must share the same key
+- **Required for WAN federation**: Cross-datacenter communication
+- **Recommended for production**: Security best practice
+
+### Consul Datacenter Concepts
+
+Understanding Consul datacenters is essential for canary deployments:
+
+**Single Datacenter Architecture:**
+
+- One WordPress deployment with its own Consul cluster
+- All Consul servers, WordPress servers, and load balancers belong to one datacenter
+- Isolated service discovery within the deployment
+
+**Multi-Datacenter Architecture (Canary Deployments):**
+
+- **Production Datacenter**: Your stable WordPress deployment
+- **Canary Datacenter**: Your test/staging WordPress deployment
+- **WAN Federation**: Datacenters communicate across networks for service discovery
+- **Shared Service Discovery**: Services in one datacenter can discover services in another
+- **Traffic Routing**: Load balancers can route traffic between datacenters for canary testing
+
+### Canary Deployment Architecture
+
+For canary deployments connecting multiple WordPress environments:
+
+**Multi-Datacenter Setup Requirements:**
+
+- **Shared Gossip Key**: All datacenters in the federation must use the same gossip encryption key
+- **Network Connectivity**: Datacenters must be able to communicate across VPC/network boundaries
+- **Service Discovery**: Consul enables cross-datacenter service discovery for canary routing
+- **Load Balancer Integration**: Nginx can route traffic between production and canary environments
+
+**Canary Traffic Flow:**
+
+1. Production datacenter serves normal traffic
+2. Canary datacenter runs new WordPress version/configuration
+3. Load balancers use Consul service discovery to find both environments
+4. Traffic can be gradually shifted from production to canary for testing
+
+### Generation
+
+Use the provided scripts in the `test/` directory to generate gossip keys:
+
+**Unix/Linux/macOS:**
+
+```bash
+cd test/
+./generate-gossip-key.sh
+```
+
+**Windows:**
+
+```cmd
+cd test
+generate-gossip-key.bat
+```
+
+**Script Options:**
+
+- `-u, --update-tfvars`: Automatically update terraform.tfvars with the generated key
+- `-f, --file FILE`: Save the key to a specific file
+- `-q, --quiet`: Output only the key (useful for scripting)
+- `-h, --help`: Show help message
+
+**Examples:**
+
+```bash
+# Generate and display key
+./generate-gossip-key.sh
+
+# Generate and automatically update terraform.tfvars
+./generate-gossip-key.sh -u
+
+# Generate and save to file
+./generate-gossip-key.sh -f my-gossip.key
+
+# Generate key for use in scripts
+GOSSIP_KEY=$(./generate-gossip-key.sh -q)
+```
+
+**Important:** Generate the key once and use the same key across all deployments that need to communicate.
+
+### Configuration
+
+Add the generated gossip key to your `terraform.tfvars` file:
+
+```hcl
+# Consul gossip encryption key
+shared_gossip_key = "your-generated-key-here"
+```
+
+**Multi-Deployment Consistency:**
+
+- Use the **same gossip key** in all terraform.tfvars files for deployments that need to communicate
+- Each deployment (datacenter) must have identical gossip key configuration
+- Key mismatch will prevent datacenters from joining the federation
+
+**Example terraform.tfvars entry:**
+
+```hcl
+shared_gossip_key = "K8n7Qz2mR5vY8x/A3sD6gJ9kL2nP5rT8uW1yE4tR7i="
+```
+
+### Network Connectivity Requirements
+
+For canary deployments across multiple WordPress environments, ensure proper network connectivity:
+
+**Datacenter Communication Ports:**
+
+- **Port 8300**: Consul server RPC (server-to-server communication)
+- **Port 8301**: Consul LAN gossip (TCP and UDP)
+- **Port 8302**: Consul WAN gossip (TCP and UDP, for federation)
+
+**Network Infrastructure Options:**
+
+**VPC Peering (Same Region):**
+
+```bash
+# Example: Connect production VPC to canary VPC
+aws ec2 create-vpc-peering-connection \
+  --vpc-id vpc-12345678 \
+  --peer-vpc-id vpc-87654321
+```
+
+**AWS Transit Gateway (Multi-Region):**
+
+- Enables connectivity between VPCs across different AWS regions
+- Supports complex routing scenarios for multiple datacenters
+- Recommended for enterprise canary deployments
+
+**Security Group Configuration:**
+
+**Critical:** Security groups must allow connectivity for:
+
+1. **Consul Inter-Datacenter Communication**: Ports 8300, 8301, 8302 between Consul servers
+2. **Service Discovery Traffic**: Allow Consul agents to communicate across peering/transit gateway
+3. **WordPress Application Traffic**: HTTP/HTTPS (80/443) for nginx upstream routing to alternate deployment
+4. **Cross-VPC CIDR Blocks**: Specific CIDR ranges to allow in security groups
+
+**Example Security Group Rules:**
+
+```hcl
+# Allow Consul WAN federation from peer datacenter
+resource "aws_security_group_rule" "consul_wan_federation" {
+  type              = "ingress"
+  from_port         = 8302
+  to_port           = 8302
+  protocol          = "tcp"
+  cidr_blocks       = ["10.1.0.0/16"]  # Peer datacenter VPC CIDR
+  security_group_id = aws_security_group.consul_servers.id
+}
+
+# Allow HTTP traffic from peer datacenter load balancers
+resource "aws_security_group_rule" "cross_datacenter_http" {
+  type              = "ingress"
+  from_port         = 80
+  to_port           = 80
+  protocol          = "tcp"
+  cidr_blocks       = ["10.1.0.0/16"]  # Peer datacenter VPC CIDR
+  security_group_id = aws_security_group.wordpress_servers.id
+}
+```
+
+**Route Table Configuration:**
+
+- Ensure route tables include routes to peer VPC CIDR blocks
+- Configure Transit Gateway route tables for multi-region connectivity
+- Verify return traffic routing is properly configured
+
+### Security Considerations
+
+**Treat as Sensitive Data:**
+
+- Store gossip keys securely (AWS Secrets Manager, encrypted files)
+- Never commit gossip keys to version control
+- Use Terraform sensitive variables to prevent key exposure in logs
+
+**Cross-Datacenter Security:**
+
+- **Network Isolation**: Maintain network security while allowing required federation traffic
+- **Principle of Least Privilege**: Only open required ports between specific resources
+- **Monitoring**: Monitor cross-datacenter traffic for security anomalies
+
+**Key Rotation:**
+
+- Plan for coordinated key rotation across all datacenters
+- Consul supports rolling key updates without downtime
+- Test key rotation procedures in non-production environments
+
+**Multi-Deployment Considerations:**
+
+- Same key must be rotated simultaneously across all federated datacenters
+- Consider using centralized key management for multiple deployments
+- Document which deployments share gossip keys
+
+### Troubleshooting Multi-Datacenter Issues
+
+**Datacenter Join Issues:**
+
+```bash
+# Check if datacenters can see each other
+consul members -wan
+
+# Verify gossip key consistency
+grep "encrypt" /etc/consul.d/consul.hcl
+
+# Test network connectivity between datacenters
+telnet <peer-consul-server-ip> 8302
+```
+
+**Cross-Datacenter Service Discovery:**
+
+```bash
+# List services from all datacenters
+consul catalog services -datacenter=production
+consul catalog services -datacenter=canary
+
+# Check cross-datacenter service resolution
+dig @127.0.0.1 -p 8600 wordpress.service.canary.consul
+```
+
+**Security Group Troubleshooting:**
+
+```bash
+# Test Consul federation connectivity
+nc -zv <peer-consul-server-ip> 8302
+
+# Test HTTP connectivity for nginx upstreams
+curl -I http://<peer-wordpress-server-ip>/
+
+# Check security group rules
+aws ec2 describe-security-groups --group-ids sg-12345678 \
+  --query 'SecurityGroups[0].IpPermissions'
+```
+
+**Network Connectivity Verification:**
+
+```bash
+# Test VPC peering connectivity
+ping <peer-vpc-instance-ip>
+
+# Check route table entries
+aws ec2 describe-route-tables --filters "Name=vpc-id,Values=vpc-12345678"
+
+# Verify Transit Gateway attachments
+aws ec2 describe-transit-gateway-attachments
+```
+
+**Common Multi-Datacenter Issues:**
+
+**Issue: "No WAN members found"**
+
+- **Root Cause**: Network connectivity or security group configuration
+- **Solution**: Verify ports 8302 (WAN gossip) and 8300 (server RPC) are open between datacenters
+
+**Issue: "Gossip key mismatch"**
+
+- **Root Cause**: Different gossip keys between datacenters
+- **Solution**: Ensure all datacenters use the same shared_gossip_key value
+
+**Issue: "Cross-datacenter service discovery fails"**
+
+- **Root Cause**: WAN federation not properly established
+- **Solution**: Check consul members -wan and verify network connectivity
+
+**Issue: "Nginx upstream routing fails to canary"**
+
+- **Root Cause**: Security groups blocking HTTP traffic between datacenters
+- **Solution**: Allow HTTP/HTTPS traffic from load balancer security groups to WordPress server security groups across VPC boundaries
+
+For additional Consul connectivity troubleshooting, see the [Troubleshooting Consul Connectivity](#troubleshooting-consul-connectivity) section below.
 
 ## Architecture Overview
 

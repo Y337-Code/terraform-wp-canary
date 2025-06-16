@@ -1,0 +1,84 @@
+# Copy this file to terraform.tfvars and customize the values for your deployment
+
+# AWS Configuration
+# aws_profile = "your-aws-profile"  # Uncomment and set your AWS profile name
+# If not set, will use default AWS credentials (environment variables, IAM role, etc.)
+
+# Region and Availability Zones
+aws_region = "us-east-1"
+aws_zone_a = "a"
+aws_zone_b = "b"
+
+# Environment and Naming
+environment = "test"
+name_prefix = "wp-test"
+owner       = "your-team-name"
+
+# VPC Configuration
+vpc_cidr             = "192.168.0.0/16"
+dmz_subnet_a_cidr    = "192.168.1.0/24"
+dmz_subnet_b_cidr    = "192.168.4.0/24"
+app_subnet_a_cidr    = "192.168.2.0/24"
+app_subnet_b_cidr    = "192.168.5.0/24"
+db_subnet_a_cidr     = "192.168.3.0/24"
+db_subnet_b_cidr     = "192.168.6.0/24"
+infra_subnet_a_cidr  = "192.168.7.0/24"
+infra_subnet_b_cidr  = "192.168.8.0/24"
+
+# Security Configuration
+allowed_inbound_cidrs = ["192.168.0.0/16"]  # Restrict to VPC CIDR for security
+
+# Database Configuration
+database_name      = "wordpress"
+db_master_username = "wpdbadmin"
+db_master_password = "ChangeMe123!"  # Change this to a secure password
+db_min_capacity    = 2.0
+db_max_capacity    = 16.0
+db_cluster_count   = 2
+
+# WordPress Database Configuration
+wp_mysql_user    = "wpuser"
+wp_mysql_user_pw = "wppassword123"  # Change this to a secure password
+wp_mysql_root_pw = "rootpassword123"  # Change this to a secure password
+
+# EFS Configuration
+wp_content_mount_point = "/var/www/html/wp-content"
+
+# Consul Configuration
+consul_servers         = 3
+consul_version         = "1.15.2"
+consul_cluster_version = "v1"
+consul_instance_type   = "t3.micro"
+
+# WordPress Configuration
+wp_instance_type = "t3.small"
+wp_servers_min   = 2
+wp_servers_max   = 6
+
+# Load Balancer Configuration
+lb_instance_type = "t3.micro"
+lb_servers_min   = 2
+lb_servers_max   = 4
+
+# Instance Configuration
+key_name  = ""  # Specify your EC2 key pair name for SSH access
+public_ip = false  # Set to true if you want public IPs on instances
+
+# Consul Features
+acl_bootstrap_bool    = "true"
+enable_connect        = "true"
+enable_wan_federation = "false"
+
+# WordPress Bootstrap
+wp_bootstrap = "true"  # Automatically install WordPress
+
+# Note: CloudWatch alerts have been completely removed from the module
+# No email configuration is needed as monitoring is limited to basic metrics
+
+# Tags
+common_tags = {
+  Environment = "test"
+  Project     = "wordpress-canary-test"
+  Automation  = "terraform"
+  Owner       = "your-team-name"
+}
