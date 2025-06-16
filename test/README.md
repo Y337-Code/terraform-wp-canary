@@ -19,8 +19,64 @@ The test infrastructure deploys:
 
 1. **AWS CLI** configured with appropriate credentials
 2. **Terraform** >= 1.0 installed
-3. **EC2 Key Pair** (optional, for SSH access)
-4. **Aurora Serverless Module** available at `../../terraform-y337-aurora-serverless`
+3. **EC2 Key Pair** (required, must exist in your AWS account)
+4. **Test Environment Dependencies** (see section below)
+5. **System Requirements** (see section below)
+
+## Test Environment Dependencies
+
+**Important**: These dependencies are specific to the test infrastructure in this folder. The main WordPress Canary module does not require these dependencies.
+
+### Required Module Dependencies
+
+The test environment requires the `terraform-y337-aurora-serverless` module to be available as a sibling directory to `terraform-wp-canary`.
+
+**Directory Structure Required:**
+
+```
+your-project-folder/
+├── terraform-wp-canary/          # This repository
+│   ├── test/                     # Test environment (this folder)
+│   ├── consul_servers.tf
+│   ├── wp_servers.tf
+│   └── ...
+└── terraform-y337-aurora-serverless/  # Required dependency module
+    ├── main.tf
+    ├── variables.tf
+    └── ...
+```
+
+**Setup Instructions:**
+
+```bash
+# Clone both repositories to the same base directory
+cd your-project-folder
+git clone <terraform-wp-canary-repo-url>
+git clone <terraform-y337-aurora-serverless-repo-url>
+
+# Verify directory structure
+ls -la
+# Should show both terraform-wp-canary/ and terraform-y337-aurora-serverless/
+```
+
+The test configuration references the Aurora module with a relative path:
+
+```hcl
+module "aurora_mysql" {
+  source = "../../terraform-y337-aurora-serverless"
+  # ...
+}
+```
+
+## System Requirements
+
+This project is designed and tested specifically with **Amazon Linux 2023**.
+
+- **Supported OS**: Amazon Linux 2023
+- **Compatibility**: All installation scripts, package management, and system configurations are optimized for Amazon Linux 2023
+- **Testing**: Infrastructure validation and performance testing conducted on Amazon Linux 2023 instances
+
+**Note**: While other Linux distributions may work, Amazon Linux 2023 is the only officially supported and tested operating system for this infrastructure.
 
 ## Quick Start
 
