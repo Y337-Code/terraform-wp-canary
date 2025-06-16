@@ -232,8 +232,6 @@ chmod -R 644 /etc/systemd/system/consul-template.service
 
 chown -R consul:consul /etc/consul-template.d
 
-systemctl restart consul
-
 # Enable and start nginx with status logging
 echo "Enabling and starting nginx..." >> ~/nginx_installation_status.txt
 if systemctl enable nginx 2>>~/nginx_installation_status.txt; then
@@ -288,11 +286,43 @@ fi
 chown -R consul:consul /etc/consul.d
 chmod -R 640 /etc/consul.d/*
 
+# Start Consul services with status logging
+echo "Starting Consul services..." >> ~/nginx_installation_status.txt
+
 systemctl daemon-reload
-systemctl enable consul
-systemctl enable consul-template
-systemctl start consul
-systemctl start consul-template
+if systemctl enable consul 2>>~/nginx_installation_status.txt; then
+    echo "Consul enabled successfully" >> ~/nginx_installation_status.txt
+    if systemctl start consul 2>>~/nginx_installation_status.txt; then
+        echo "Consul started successfully" >> ~/nginx_installation_status.txt
+        
+        # Wait for Consul to be ready before starting consul-template
+        echo "Waiting for Consul to be ready..." >> ~/nginx_installation_status.txt
+        for i in {1..30}; do
+            if curl -s http://127.0.0.1:8500/v1/status/leader >/dev/null 2>&1; then
+                echo "Consul is ready after $${i} seconds" >> ~/nginx_installation_status.txt
+                break
+            fi
+            sleep 1
+        done
+        
+        # Start consul-template
+        if systemctl enable consul-template 2>>~/nginx_installation_status.txt; then
+            echo "Consul-template enabled successfully" >> ~/nginx_installation_status.txt
+            if systemctl start consul-template 2>>~/nginx_installation_status.txt; then
+                echo "Consul-template started successfully" >> ~/nginx_installation_status.txt
+                echo "All Consul services started successfully" >> ~/nginx_installation_status.txt
+            else
+                echo "Failed to start consul-template" >> ~/nginx_installation_status.txt
+            fi
+        else
+            echo "Failed to enable consul-template" >> ~/nginx_installation_status.txt
+        fi
+    else
+        echo "Failed to start consul" >> ~/nginx_installation_status.txt
+    fi
+else
+    echo "Failed to enable consul" >> ~/nginx_installation_status.txt
+fi
 
 cat << EOF > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
 {

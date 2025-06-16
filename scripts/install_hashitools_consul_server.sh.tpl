@@ -215,10 +215,10 @@ else
   echo "canary key already exists, skipping"
 fi
 
-# Set canary IP pattern
+# Set canary IP pattern replace 8.8.8.8 with canary IP ranges
 if ! consul kv get canary_ip &>/dev/null; then
   echo "Setting canary IP"
-  consul kv put canary_ip "8.8.8.8"
+  consul kv put canary_ip "8.8.8.8 1;"
 else
   echo "canary/ips key already exists, skipping"
 fi

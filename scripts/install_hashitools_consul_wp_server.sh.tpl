@@ -1,15 +1,5 @@
 #!/usr/bin/env bash
 
-# Normalize Input Variables
-DBName="${wp_db_name}"
-DBUser="${wp_mysql_user}"
-DBPassword="${wp_mysql_user_pw}"
-DBRootPassword="${wp_mysql_root_pw}"
-DBHost="${wp_db_host}"
-ENV_NAME="${environment_name}"
-EFS_MOUNT="${wp_content_mount}"
-EFS_AP_ID="${wp_content_efs_ap_id}"
-WP_HOSTNAME="${wp_hostname}"
 
 # System optimization and updates
 echo 'GRUB_CMDLINE_LINUX="zswap.enabled=1 zswap.compressor=lz4 ipv6.disable=1"' >> /etc/default/grub
@@ -17,16 +7,58 @@ grub2-mkconfig -o /boot/efi/EFI/amzn/grub.cfg
 yum -y update
 yum install -y amazon-efs-utils
 
+# MANDATORY: Install Apache and PHP (regardless of bootstrap setting)
+echo "Installing Apache and PHP (mandatory)..." > ~/wp_installation_status.txt
+if yum install -y httpd php php-fpm php-xml php-gd php-common php-cli php-process php-pdo php-intl php-mysqlnd php-mbstring php-soap 2>>~/wp_installation_status.txt; then
+    echo "Apache and PHP installed successfully (mandatory)" >> ~/wp_installation_status.txt
+    
+    # Install SSL module
+    if yum install -y mod_ssl 2>>~/wp_installation_status.txt; then
+        echo "SSL module installed successfully (mandatory)" >> ~/wp_installation_status.txt
+    else
+        echo "SSL module installation failed (mandatory)" >> ~/wp_installation_status.txt
+    fi
+    
+    # Enable and start Apache services with detailed logging
+    echo "Enabling Apache and PHP-FPM services..." >> ~/wp_installation_status.txt
+    if systemctl enable httpd 2>>~/wp_installation_status.txt; then
+        echo "Apache (httpd) enabled successfully" >> ~/wp_installation_status.txt
+        if systemctl enable php-fpm 2>>~/wp_installation_status.txt; then
+            echo "PHP-FPM enabled successfully" >> ~/wp_installation_status.txt
+            
+            # Start services
+            echo "Starting Apache and PHP-FPM services..." >> ~/wp_installation_status.txt
+            if systemctl start httpd 2>>~/wp_installation_status.txt; then
+                echo "Apache (httpd) started successfully" >> ~/wp_installation_status.txt
+                if systemctl start php-fpm 2>>~/wp_installation_status.txt; then
+                    echo "PHP-FPM started successfully" >> ~/wp_installation_status.txt
+                    echo "All Apache services enabled and started successfully (mandatory)" >> ~/wp_installation_status.txt
+                else
+                    echo "Failed to start PHP-FPM service" >> ~/wp_installation_status.txt
+                fi
+            else
+                echo "Failed to start Apache (httpd) service" >> ~/wp_installation_status.txt
+            fi
+        else
+            echo "Failed to enable PHP-FPM service" >> ~/wp_installation_status.txt
+        fi
+    else
+        echo "Failed to enable Apache (httpd) service" >> ~/wp_installation_status.txt
+    fi
+else
+    echo "Failed to install Apache and PHP (mandatory)" >> ~/wp_installation_status.txt
+fi
+
 # EFS Mount Configuration
-echo "EFS Mount: $EFS_MOUNT, Access Point: $EFS_AP_ID" > ~/efs_status.txt
-if [[ ! -z "$EFS_MOUNT" ]]; then
+echo "EFS Mount: ${wp_content_mount}, Access Point: ${wp_content_efs_ap_id}" > ~/efs_status.txt
+if [[ ! -z "${wp_content_mount}" ]]; then
     mkdir -p /var/www/html
     sed -i '/^fs-/d' /etc/fstab
     sleep 30  # Wait for EFS availability
     
-    if mount -t efs -o tls,accesspoint=$EFS_AP_ID $EFS_MOUNT:/ /var/www/html/ 2>>~/efs_status.txt; then
+    if mount -t efs -o tls,accesspoint=${wp_content_efs_ap_id} ${wp_content_mount}:/ /var/www/html/ 2>>~/efs_status.txt; then
         echo "EFS mounted successfully" >> ~/efs_status.txt
-        echo "$EFS_MOUNT:/ /var/www/html/ efs tls,accesspoint=$EFS_AP_ID,_netdev 0 0" >> /etc/fstab
+        echo "${wp_content_mount}:/ /var/www/html/ efs tls,accesspoint=${wp_content_efs_ap_id},_netdev 0 0" >> /etc/fstab
         chown ec2-user:apache /var/www/html
         mkdir -p /var/www/html/wp-content
         chown ec2-user:apache /var/www/html/wp-content
@@ -42,20 +74,12 @@ fi
 %{ if wp_bootstrap }
 echo "WordPress bootstrap enabled" >> ~/wp_status.txt
 
-# Install packages for Amazon Linux 2023
-echo "Starting WordPress package installation..." > ~/wp_installation_status.txt
-if yum install -y httpd php php-fpm php-xml php-gd php-common php-cli php-process php-pdo php-intl php-mysqlnd php-mbstring php-soap mysql openssl wget tar 2>>~/wp_installation_status.txt; then
-    echo "WordPress packages installed successfully" >> ~/wp_installation_status.txt
+# Install additional packages for WordPress bootstrap
+echo "Installing additional WordPress packages..." >> ~/wp_installation_status.txt
+if yum install -y mariadb openssl wget tar 2>>~/wp_installation_status.txt; then
+    echo "Additional WordPress packages installed successfully" >> ~/wp_installation_status.txt
 else
-    echo "Failed to install WordPress packages" >> ~/wp_installation_status.txt
-fi
-
-# Install and configure SSL module for Amazon Linux 2023
-echo "Configuring SSL module..." >> ~/wp_installation_status.txt
-if yum install -y mod_ssl 2>>~/wp_installation_status.txt; then
-    echo "SSL module installed successfully" >> ~/wp_installation_status.txt
-else
-    echo "SSL module installation failed, using built-in SSL support" >> ~/wp_installation_status.txt
+    echo "Failed to install additional WordPress packages" >> ~/wp_installation_status.txt
 fi
 
 # Pre-installation checks
@@ -101,22 +125,22 @@ if [ "$WP_FAILED" = false ]; then
         
         # Configure WordPress
         cp $WORDPRESS_DIR/wp-config-sample.php $WORDPRESS_DIR/wp-config.php
-        sed -i "s/database_name_here/$DBName/g" $WORDPRESS_DIR/wp-config.php
-        sed -i "s/username_here/$DBUser/g" $WORDPRESS_DIR/wp-config.php
-        sed -i "s/password_here/$DBPassword/g" $WORDPRESS_DIR/wp-config.php
-        sed -i "s/localhost/$DBHost/g" $WORDPRESS_DIR/wp-config.php
+        sed -i "s/database_name_here/${wp_db_name}/g" $WORDPRESS_DIR/wp-config.php
+        sed -i "s/username_here/${wp_mysql_user}/g" $WORDPRESS_DIR/wp-config.php
+        sed -i "s/password_here/${wp_mysql_user_pw}/g" $WORDPRESS_DIR/wp-config.php
+        sed -i "s/localhost/${wp_db_host}/g" $WORDPRESS_DIR/wp-config.php
         
         # WordPress salts
         SALT=$(curl -L https://api.wordpress.org/secret-key/1.1/salt/)
         printf '%s\n' "g/put your unique phrase here/d" a "$SALT" . w | ed -s $WORDPRESS_DIR/wp-config.php
         
         # WordPress URLs
-        echo "define( 'WP_HOME', 'https://$WP_HOSTNAME' );" >> $WORDPRESS_DIR/wp-config.php
-        echo "define( 'WP_SITEURL', 'https://$WP_HOSTNAME' );" >> $WORDPRESS_DIR/wp-config.php
+        echo "define( 'WP_HOME', 'https://${wp_hostname}' );" >> $WORDPRESS_DIR/wp-config.php
+        echo "define( 'WP_SITEURL', 'https://${wp_hostname}' );" >> $WORDPRESS_DIR/wp-config.php
         
         # SSL Configuration
         mkdir -p /etc/ssl/private /etc/ssl/certs
-        openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/ssl/private/wordpress.key -out /etc/ssl/certs/wordpress.crt -subj "/C=US/ST=State/L=City/O=Organization/CN=$WP_HOSTNAME"
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/ssl/private/wordpress.key -out /etc/ssl/certs/wordpress.crt -subj "/C=US/ST=State/L=City/O=Organization/CN=${wp_hostname}"
         
         # Apache SSL config with dynamic DocumentRoot
         cat > /etc/httpd/conf.d/wordpress-ssl.conf << EOL
@@ -139,10 +163,10 @@ if [ "$WP_FAILED" = false ]; then
 EOL
         
         # Database setup
-        mysql -h "$DBHost" -u root -p"$DBRootPassword" << EOF
-CREATE DATABASE IF NOT EXISTS $DBName DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS '$DBUser'@'%' IDENTIFIED BY '$DBPassword';
-GRANT ALL PRIVILEGES ON $DBName.* TO '$DBUser'@'%';
+        mysql -h "${wp_db_host}" -u root -p"${wp_mysql_root_pw}" << EOF
+CREATE DATABASE IF NOT EXISTS ${wp_db_name} DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS '${wp_mysql_user}'@'%' IDENTIFIED BY '${wp_mysql_user_pw}';
+GRANT ALL PRIVILEGES ON ${wp_db_name}.* TO '${wp_mysql_user}'@'%';
 FLUSH PRIVILEGES;
 EOF
         
@@ -161,6 +185,14 @@ EOF
 fi
 %{ else }
 echo "WordPress bootstrap disabled" >> ~/wp_status.txt
+
+# Install additional packages for non-bootstrap mode
+echo "Installing additional packages (no bootstrap)..." >> ~/wp_installation_status.txt
+if yum install -y mariadb openssl wget tar 2>>~/wp_installation_status.txt; then
+    echo "Additional packages installed successfully (no bootstrap)" >> ~/wp_installation_status.txt
+else
+    echo "Failed to install additional packages (no bootstrap)" >> ~/wp_installation_status.txt
+fi
 %{ endif }
 
 # System configuration
@@ -272,10 +304,15 @@ if [ -f "/var/www/html/wp-config.php" ]; then
     sed -i "s/define( \"DB_HOST\", \"[^\"]*\" );/define( \"DB_HOST\", \"$DBHost\" );/g" /var/www/html/wp-config.php
 fi
 
-# Consul setup
+# Consul setup with status logging
+echo "Starting Consul setup..." >> ~/wp_installation_status.txt
 yum-config-manager --add-repo https://rpm.releases.hashicorp.com/AmazonLinux/hashicorp.repo
-yum install -y consul
-rm -rf /opt/consul/data
+if yum install -y consul 2>>~/wp_installation_status.txt; then
+    echo "Consul installed successfully" >> ~/wp_installation_status.txt
+    rm -rf /opt/consul/data
+else
+    echo "Failed to install Consul" >> ~/wp_installation_status.txt
+fi
 
 cat > /etc/consul.d/wp_lb.json << EOF
 {
@@ -322,10 +359,50 @@ EOF
     consul kv put peer_datacenter_name "${peer_datacenter_name}"
 fi
 
+echo "Creating Consul configuration..." >> ~/wp_installation_status.txt
 chown -R consul:consul /etc/consul.d
 chmod -R 640 /etc/consul.d/*
+echo "Consul configuration created successfully" >> ~/wp_installation_status.txt
 
+# Consul startup with logging
+echo "Starting Consul services..." >> ~/wp_installation_status.txt
 systemctl daemon-reload
-systemctl enable consul
-# Note: tuned is not available in Amazon Linux 2023 repositories
-# Network optimizations are handled via sysctl.conf above
+
+if systemctl enable consul 2>>~/wp_installation_status.txt; then
+    echo "Consul enabled successfully" >> ~/wp_installation_status.txt
+    
+    # Wait for AWS metadata
+    for i in {1..10}; do
+        if curl -s --max-time 3 http://169.254.169.254/latest/meta-data/instance-id >/dev/null 2>&1; then
+            echo "AWS metadata ready" >> ~/wp_installation_status.txt
+            break
+        fi
+        sleep 2
+    done
+    
+    # Start Consul
+    if systemctl start consul 2>>~/wp_installation_status.txt; then
+        echo "Consul start succeeded" >> ~/wp_installation_status.txt
+        
+        # Wait for Consul API
+        for i in {1..15}; do
+            if curl -s --max-time 3 http://127.0.0.1:8500/v1/status/leader >/dev/null 2>&1; then
+                echo "Consul API ready" >> ~/wp_installation_status.txt
+                sleep 3
+                if consul members >/dev/null 2>&1; then
+                    MEMBER_COUNT=$(consul members 2>/dev/null | wc -l)
+                    echo "Consul joined cluster - $${MEMBER_COUNT} members" >> ~/wp_installation_status.txt
+                    echo "Consul startup completed" >> ~/wp_installation_status.txt
+                else
+                    echo "Consul API ready, cluster join pending" >> ~/wp_installation_status.txt
+                fi
+                break
+            fi
+            sleep 2
+        done
+    else
+        echo "Consul start failed - manual start required" >> ~/wp_installation_status.txt
+    fi
+else
+    echo "Failed to enable Consul" >> ~/wp_installation_status.txt
+fi
