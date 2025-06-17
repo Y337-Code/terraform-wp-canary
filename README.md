@@ -13,7 +13,32 @@ This implementation extends the AWS reference architecture with advanced capabil
 - **Blue/Green Deployments**: Designed for seamless integration with AWS Global Accelerator for zero-downtime deployments
 - **Advanced Caching**: Multi-layer caching with nginx reverse proxy and application-level optimizations
 - **Performance Optimization**: Tuned for high performance under sudden and heavy traffic loads
-- **Canary Deployments**: Cross-datacenter federation capabilities for gradual rollouts and A/B testing with advanced IP-based routing control using Consul key-value store and consul-template to dynamically configure nginx geo module for upstream selection based on client IP ranges, enabling granular canary traffic distribution and zero-downtime routing rule updates
+- **Canary Deployments**: Cross-datacenter federation capabilities for gradual rollouts and A/B testing (see dedicated Canary Deployments section below)
+
+**Canary Deployments:**
+This module is specifically designed for multi-region canary deployment configurations where the module is deployed to multiple AWS regions with cross-region connectivity enabling advanced traffic management and gradual rollouts.
+
+**Multi-Region Architecture:**
+
+- **Regional Deployment Pattern**: Deploy the module to each target AWS region (e.g., us-east-1 for production, us-west-2 for canary)
+- **Cross-Region Connectivity**: Establish network routing between regions using VPC peering, AWS Transit Gateway, or Direct Connect
+- **Consul Datacenter Federation**: Each regional deployment creates a separate Consul datacenter that federates with other regions
+- **Shared Service Discovery**: Consul datacenters discover and communicate with each other across regions for unified service catalog
+
+**Advanced IP-Based Routing:**
+
+- **Consul Key-Value Integration**: Store routing rules and IP mappings in Consul KV for centralized traffic management
+- **Dynamic Configuration**: Consul-template watches Consul KV changes and automatically regenerates nginx configurations
+- **Nginx Geo Module**: Dynamically configure upstream selection based on client IP ranges and geographic locations
+- **Granular Traffic Control**: Route specific IP ranges or percentages of traffic to canary environments
+- **Zero-Downtime Updates**: Modify routing rules in real-time without service interruption
+
+**Operational Benefits:**
+
+- **Gradual Rollouts**: Incrementally shift traffic from production to canary based on IP ranges or percentages
+- **Geographic Testing**: Route traffic from specific regions or countries to canary environments
+- **Risk Mitigation**: Limit canary exposure to controlled user segments while maintaining production stability
+- **A/B Testing**: Support sophisticated testing scenarios with precise traffic distribution control
 
 **Key Performance Features:**
 
