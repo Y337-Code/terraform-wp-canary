@@ -2,6 +2,29 @@
 
 This Terraform project deploys a WordPress infrastructure on AWS using HashiCorp Consul for service discovery and configuration management. The infrastructure includes autoscaling groups for Consul servers, WordPress application servers, and load balancer servers with caching.
 
+## AWS Best Practices Foundation
+
+This module is built upon the [AWS Best Practices for WordPress](https://docs.aws.amazon.com/whitepapers/latest/best-practices-wordpress/reference-architecture.html) reference architecture, providing a production-ready foundation that follows AWS recommended patterns for scalability, security, and reliability.
+
+**Enhanced Architecture:**
+This implementation extends the AWS reference architecture with advanced capabilities:
+
+- **Service Discovery**: HashiCorp Consul enables dynamic service discovery and health checking across all components
+- **Blue/Green Deployments**: Designed for seamless integration with AWS Global Accelerator for zero-downtime deployments
+- **Advanced Caching**: Multi-layer caching with nginx reverse proxy and application-level optimizations
+- **Performance Optimization**: Tuned for high performance under sudden and heavy traffic loads
+- **Canary Deployments**: Cross-datacenter federation capabilities for gradual rollouts and A/B testing
+
+**Key Performance Features:**
+
+- Auto-scaling WordPress application servers with EFS shared storage
+- Aurora Serverless v2 with intelligent scaling for database workloads
+- Nginx load balancers with caching and SSL termination
+- Consul-based health checks and automatic failover
+- Optimized for burst traffic patterns and sustained high loads
+
+This architecture maintains all AWS security and operational best practices while adding enterprise-grade deployment flexibility and performance enhancements.
+
 ## 🎉 Stable Release v0.1.0
 
 This is a **stable release** of the Terraform WordPress Canary project.
