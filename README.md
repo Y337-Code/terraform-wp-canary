@@ -13,7 +13,7 @@ This implementation extends the AWS reference architecture with advanced capabil
 - **Blue/Green Deployments**: Designed for seamless integration with AWS Global Accelerator for zero-downtime deployments
 - **Advanced Caching**: Multi-layer caching with nginx reverse proxy and application-level optimizations
 - **Performance Optimization**: Tuned for high performance under sudden and heavy traffic loads
-- **Canary Deployments**: Cross-datacenter federation capabilities for gradual rollouts and A/B testing
+- **Canary Deployments**: Cross-datacenter federation capabilities for gradual rollouts and A/B testing with advanced IP-based routing control using Consul key-value store and consul-template to dynamically configure nginx geo module for upstream selection based on client IP ranges, enabling granular canary traffic distribution and zero-downtime routing rule updates
 
 **Key Performance Features:**
 
