@@ -162,6 +162,54 @@ echo "WP bootstrap disabled" >> ~/install.log
 yum install -y mariadb105 openssl wget tar 2>>~/install.log
 %{ endif }
 
+# Create region-info.php file
+create_region_info() {
+    local wp_dir="$1"
+    local region_info_file="$wp_dir/region-info.php"
+    
+    if [ ! -f "$region_info_file" ]; then
+        echo "Creating region-info.php in $wp_dir" >> ~/install.log
+        
+        # Get instance metadata
+        INSTANCE_ID=$(curl -s --max-time 5 http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "unavailable")
+        INSTANCE_TYPE=$(curl -s --max-time 5 http://169.254.169.254/latest/meta-data/instance-type 2>/dev/null || echo "unavailable")
+        LOCAL_IPV4=$(curl -s --max-time 5 http://169.254.169.254/latest/meta-data/local-ipv4 2>/dev/null || echo "unavailable")
+        AZ=$(curl -s --max-time 5 http://169.254.169.254/latest/meta-data/placement/availability-zone 2>/dev/null || echo "unavailable")
+        DEPLOYMENT_TIME=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+        
+        cat > "$region_info_file" << 'EOF'
+<?php
+header('Content-Type: text/plain; charset=utf-8');
+echo "Environment: ${terraform_workspace}\n";
+?>
+EOF
+        
+        # Replace placeholders with actual values
+        sed -i "s/INSTANCE_ID/$INSTANCE_ID/g" "$region_info_file"
+        sed -i "s/DEPLOYMENT_TIME/$DEPLOYMENT_TIME/g" "$region_info_file"
+        
+        # Set proper permissions
+        chown ec2-user:apache "$region_info_file"
+        chmod 644 "$region_info_file"
+        
+        echo "region-info.php created successfully" >> ~/install.log
+    else
+        echo "region-info.php already exists, skipping creation" >> ~/install.log
+    fi
+}
+
+# Determine WordPress directory and create region-info.php
+if [ -f "/var/www/html/wp-config.php" ]; then
+    create_region_info "/var/www/html"
+elif [ -f "/var/www/html-local/wp-config.php" ]; then
+    create_region_info "/var/www/html-local"
+elif [ -d "/var/www/html" ] && [ "$(ls -A /var/www/html 2>/dev/null)" ]; then
+    # WordPress directory exists and is not empty
+    create_region_info "/var/www/html"
+else
+    echo "WordPress not detected, skipping region-info.php creation" >> ~/install.log
+fi
+
 # System configuration
 echo -e "apache soft nofile 65536\napache hard nofile 65536\napache soft nproc 16384\napache hard nproc 16384" >> /etc/security/limits.conf
 echo -e "<IfModule mpm_prefork_module>\nStartServers 5\nMinSpareServers 5\nMaxSpareServers 10\nServerLimit 2000\nMaxRequestWorkers 2000\nMaxConnectionsPerChild 0\n</IfModule>" >> /etc/httpd/conf.modules.d/00-mpm.conf
@@ -187,7 +235,7 @@ sed -i "s/pm.max_spare_servers = .*/pm.max_spare_servers = $calc_pm_max_spare_se
 sed -i "s/pm.max_requests = .*/pm.max_requests = 300/" /etc/php-fpm.d/www.conf
 
 # OPcache
-echo -e "opcache.enable=1\nopcache.enable_cli=0\nopcache.memory_consumption=128\nopcache.interned_strings_buffer=256\nopcache.max_accelerated_files=4000\nopcache.validate_timestamps=1\nopcache.revalidate_freq=2\nopcache.fast_shutdown=1" >> /etc/php.ini
+echo -e "opcache.enable=1\nopcache.enable_cli=0\nopcache.memory_consumption=256\nopcache.interned_strings_buffer=32\nopcache.max_accelerated_files=100000\nopcache.validate_timestamps=1\nopcache.revalidate_freq=2\nopcache.fast_shutdown=1" >> /etc/php.ini
 
 systemctl enable php-fpm httpd
 

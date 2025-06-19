@@ -57,7 +57,8 @@ resource "aws_launch_template" "wp_servers" {
       peer_datacenter_region  = var.peer_datacenter_region,
       peer_environment_name   = var.peer_environment_name,
       wp_bootstrap            = var.wp_bootstrap,
-      wp_hostname             = var.wp_hostname
+      wp_hostname             = var.wp_hostname,
+      terraform_workspace     = terraform.workspace
   }))
 
   network_interfaces {
