@@ -1,6 +1,6 @@
 # Terraform WordPress Canary Project
 
-This Terraform project deploys a WordPress infrastructure on AWS using HashiCorp Consul for service discovery and configuration management. The infrastructure includes autoscaling groups for Consul servers, WordPress application servers, and load balancer servers with caching.
+This Terraform project deploys a high availability WordPress solution to AWS. The code includes autoscaling templates for Consul, WordPress, and Nginx. While excellent for standalone deployments, this module also provides multi-region blue / green and canary deployment configurations when the module is deployed in two AWS regions with cross-region VPC peering / routes enabled. The nginx configuration provides advanced caching and enhanced canary orchestration capabilities when used behind AWS global accelerator.
 
 ## AWS Best Practices Foundation
 
@@ -13,10 +13,7 @@ This implementation extends the AWS reference architecture with advanced capabil
 - **Blue/Green Deployments**: Designed for seamless integration with AWS Global Accelerator for zero-downtime deployments
 - **Advanced Caching**: Multi-layer caching with nginx reverse proxy and application-level optimizations
 - **Performance Optimization**: Tuned for high performance under sudden and heavy traffic loads
-- **Canary Deployments**: Cross-datacenter federation capabilities for gradual rollouts and A/B testing (see dedicated Canary Deployments section below)
-
-**Canary Deployments:**
-This module is specifically designed for multi-region canary deployment configurations where the module is deployed to multiple AWS regions with cross-region connectivity enabling advanced traffic management and gradual rollouts.
+- **Canary Deployments**: Cross-datacenter federation capabilities for gradual rollouts and A/B testing
 
 **Multi-Region Architecture:**
 
@@ -50,7 +47,7 @@ This module is specifically designed for multi-region canary deployment configur
 
 This architecture maintains all AWS security and operational best practices while adding enterprise-grade deployment flexibility and performance enhancements.
 
-## 🎉 Stable Release v0.1.0
+## Stable Release v0.1.0
 
 This is a **stable release** of the Terraform WordPress Canary project.
 
@@ -58,13 +55,13 @@ This is a **stable release** of the Terraform WordPress Canary project.
 
 ### Key Features in v0.1.0:
 
-- ✅ **Enhanced Database Connectivity**: 25-minute Aurora readiness check with exponential backoff
-- ✅ **Comprehensive Troubleshooting**: Consolidated `~/install.log` with detailed debug information
-- ✅ **Fixed Server Count Issues**: Proper variable type handling for WordPress server scaling
-- ✅ **Robust Credential Management**: Separate Aurora master and WordPress application credentials
-- ✅ **Production Ready**: Tested database connectivity, health checks, and installation processes
-- ✅ **AWS User Data Optimization**: Scripts optimized to fit within 16KB AWS limits
-- ✅ **Self-Signed Certificate Support**: Health checks compatible with self-signed SSL certificates
+- **Enhanced Database Connectivity**: 25-minute Aurora readiness check with exponential backoff
+- **Comprehensive Troubleshooting**: Consolidated `~/install.log` with detailed debug information
+- **Fixed Server Count Issues**: Proper variable type handling for WordPress server scaling
+- **Robust Credential Management**: Separate Aurora master and WordPress application credentials
+- **Production Ready**: Tested database connectivity, health checks, and installation processes
+- **AWS User Data Optimization**: Scripts optimized to fit within 16KB AWS limits
+- **Self-Signed Certificate Support**: Health checks compatible with self-signed SSL certificates
 
 This version has been thoroughly tested and is recommended for production deployments.
 
